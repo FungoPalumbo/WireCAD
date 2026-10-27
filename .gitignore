@@ -4,3 +4,4 @@ obj/
 *.user
 file test/
 *.pdf
+release/

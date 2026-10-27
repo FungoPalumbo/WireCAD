@@ -34,6 +34,7 @@ public partial class MainWindow
             {
                 DrawCanvas.Children.Remove(path);
                 DrawCanvas.Children.Add(path);
+                RaiseTwistStrands(sheath);
             }
             if (_layers.TryGetValue(sheath, out Path? layer))
             {
@@ -86,8 +87,9 @@ public partial class MainWindow
     /// <summary>Fili interni di una guaina con pin: uno per ingresso, dal pin d'ingresso a quello di uscita.</summary>
     private void UpdateSheathInner(SheathEntity sheath)
     {
-        Geometry? lines = sheath.WireCount > 0 && sheath.Inside != SheathEntity.InsideHidden
-            ? sheath.InnerGeometry(SheathAnalyzer.UsedLinks(sheath, _entities.OfType<WireEntity>()))
+        // i collegamenti ingresso→uscita sostituiti da fili verso i pin di una guaina annidata non si disegnano
+        Geometry? lines = sheath.WireCount > 0 && !sheath.IsTwisted && sheath.Inside != SheathEntity.InsideHidden
+            ? sheath.InnerGeometry(SheathAnalyzer.UsedLinks(sheath, _entities.OfType<WireEntity>(), _entities.OfType<SheathEntity>()))
             : null;
         if (lines == null)
         {
@@ -109,23 +111,116 @@ public partial class MainWindow
         inner.Opacity = sheath.Inside == SheathEntity.InsideVisible ? 1.0 : 0.35;
     }
 
-    private string NextSheathTag()
+    private string NextSheathTag(string prefix = "FA")
     {
         int max = 0;
         foreach (SheathEntity sheath in _entities.OfType<SheathEntity>())
         {
-            if (sheath.Tag.StartsWith("G", StringComparison.OrdinalIgnoreCase)
-                && int.TryParse(sheath.Tag.AsSpan(1), NumberStyles.None, CultureInfo.InvariantCulture, out int number)
+            if (sheath.Tag.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
+                && int.TryParse(sheath.Tag.AsSpan(prefix.Length), NumberStyles.None, CultureInfo.InvariantCulture, out int number)
                 && number > max)
             {
                 max = number;
             }
         }
-        return "G" + (max + 1).ToString(CultureInfo.InvariantCulture);
+        return prefix + (max + 1).ToString(CultureInfo.InvariantCulture);
+    }
+
+    // ---------------------------------------------------------------- guaina disposta lungo un'altra
+
+    private SheathEntity? _attachParent;
+    private double _attachFrom;
+
+    /// <summary>Guaina sul cui corpo (non vicino ai suoi pin) cade il punto indicato, con l'ascissa lungo il suo asse.</summary>
+    private SheathEntity? FindSheathBody(Point world, out double along)
+    {
+        along = 0;
+        double pinReach = Math.Max(1.5, 8 / _viewTransform.Matrix.M11);
+        SheathEntity? best = null;
+        double bestDistance = double.MaxValue;
+        foreach (SheathEntity sheath in _entities.OfType<SheathEntity>())
+        {
+            if (!sheath.TryProject(world, out double s, out double distance) || distance > sheath.DrawWidth / 2 + 0.5)
+            {
+                continue;
+            }
+            bool nearPin = false;
+            for (int i = 0; i < sheath.PinCount && !nearPin; i++)
+            {
+                nearPin = (sheath.GetPinPosition(i) - world).Length <= pinReach;
+            }
+            if (nearPin || distance >= bestDistance)
+            {
+                continue;
+            }
+            best = sheath;
+            bestDistance = distance;
+            along = s;
+        }
+        return best;
+    }
+
+    private void FinishAttachedSheath(double to)
+    {
+        SheathEntity parent = _attachParent!;
+        double from = _attachFrom;
+        _attachParent = null;
+        _previewPath.Visibility = Visibility.Collapsed;
+        if (Math.Abs(to - from) < 1)
+        {
+            StatusHint.Text = "I due punti sono troppo vicini: scegli un tratto più lungo.";
+            return;
+        }
+        string? text = Dialogs.Prompt(this, "Fascio lungo un altro",
+            "Numero di fili che entrano (e quindi escono) dal nuovo fascio.\nCon 0 non si creano pin.",
+            parent.WireCount.ToString(CultureInfo.CurrentCulture));
+        if (text == null)
+        {
+            return;
+        }
+        if (!int.TryParse(text.Trim(), NumberStyles.Integer, CultureInfo.CurrentCulture, out int count) || count < 0 || count > 64)
+        {
+            StatusHint.Text = "Numero di fili non valido: serve un intero da 0 a 64.";
+            return;
+        }
+        bool ferrite = MessageBox.Show(this,
+            "Che cosa vuoi creare lungo il fascio?\n\nSì = una ferrite (disegnata attorno al fascio)\nNo = un fascio (disegnato dentro il fascio)",
+            "Fascio lungo un altro", MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes;
+        SheathEntity child = SheathEntity.CreateAttached(parent, from, to, ferrite ? 1.35 : 0.7);
+        child.WireCount = count;
+        if (ferrite)
+        {
+            child.SheathType = SheathEntity.FerriteType;
+        }
+        child.Tag = NextSheathTag(ferrite ? "FE" : "FA");
+        child.Name = child.Tag;
+        AddEntity(child);
+        SetSelection(new[] { child });
+        CommitChange();
+        StatusHint.Text = $"{child.Tag} creata lungo {parent.Tag}: l'inizio e la fine si regolano dalle proprietà.";
     }
 
     private void SheathClick(Point world)
     {
+        if (_attachParent != null)
+        {
+            if (_attachParent.TryProject(world, out double along, out _))
+            {
+                FinishAttachedSheath(along);
+            }
+            return;
+        }
+        if (_sheathPoints.Count == 0)
+        {
+            SheathEntity? parent = FindSheathBody(world, out double start);
+            if (parent != null)
+            {
+                _attachParent = parent;
+                _attachFrom = start;
+                StatusHint.Text = $"Fascio lungo {parent.Tag}: clicca il punto finale sullo stesso fascio. Esc annulla.";
+                return;
+            }
+        }
         Point point = SnapWithAngleLock(world).Point;
         if (_sheathPoints.Count > 0 && (point - _sheathPoints[_sheathPoints.Count - 1]).Length < 1e-6)
         {
@@ -137,6 +232,7 @@ public partial class MainWindow
     private void CancelSheath()
     {
         _sheathPoints.Clear();
+        _attachParent = null;
         if (_tool == ToolType.Sheath)
         {
             _previewPath.Visibility = Visibility.Collapsed;
@@ -147,8 +243,8 @@ public partial class MainWindow
     {
         if (_sheathPoints.Count >= 2)
         {
-            string? text = Dialogs.Prompt(this, "Guaina",
-                "Numero di fili che entrano (e quindi escono) dalla guaina.\nCon 0 non si creano pin: i fili vengono associati in base alla geometria.",
+            string? text = Dialogs.Prompt(this, "Fascio",
+                "Numero di fili che entrano (e quindi escono) dal fascio.\nCon 0 non si creano pin: i fili vengono associati in base alla geometria.",
                 _sheathWireCount.ToString(CultureInfo.CurrentCulture));
             if (text == null)
             {
@@ -190,9 +286,17 @@ public partial class MainWindow
         {
             List<WireEntity> inside = SheathAnalyzer.WiresIn(sheath, wires);
             sheath.ContainedCount = inside.Count;
+            if (inside.Count == 0 && sheath.ParentId is Guid parentId
+                && _byId.TryGetValue(parentId, out EntityBase? baseEntity) && baseEntity is SheathEntity baseSheath)
+            {
+                // una guaina disposta lungo un'altra racchiude gli stessi fili
+                inside = SheathAnalyzer.WiresIn(baseSheath, wires);
+            }
+            sheath.ContainedCount = inside.Count;
             sheath.ContainedWires = string.Join(" ", inside
                 .Select(wire => string.IsNullOrWhiteSpace(wire.Number) ? wire.Name : wire.Number)
                 .OrderBy(text => text, StringComparer.OrdinalIgnoreCase));
+            UpdateTwistColors(sheath, wires);
             UpdateSheathInner(sheath);
         }
         RefreshFields();
@@ -223,5 +327,4 @@ public partial class MainWindow
     }
 
     private void BtnSheath_Click(object sender, RoutedEventArgs e) => SetTool(ToolType.Sheath);
-
 }

@@ -127,7 +127,7 @@
                               MouseRightButtonUp="BtnWire_RightClick">
                     <Viewbox Width="20" Height="20"><Canvas Width="24" Height="24"><Path Style="{StaticResource Ico}" Data="M3,18 H10 V7 H21"/></Canvas></Viewbox>
                 </ToggleButton>
-                <ToggleButton x:Name="BtnSheath" ToolTip="Guaina (G): racchiude i fili lungo un tracciato" Click="BtnSheath_Click">
+                <ToggleButton x:Name="BtnSheath" ToolTip="Fascio (G): guaina, fili twistati o ferrite lungo un tracciato" Click="BtnSheath_Click">
                     <Viewbox Width="20" Height="20"><Canvas Width="24" Height="24"><Path Style="{StaticResource Ico}" Data="M3,8 H15 Q21,8 21,14 V21 M3,16 H11 Q13,16 13,18 V21 M7,8 V16 M11,8 V16"/></Canvas></Viewbox>
                 </ToggleButton>
                 <ToggleButton x:Name="BtnPin" ToolTip="Pin (N): punto numerato a cui agganciare fili e linee" Click="BtnPin_Click">
@@ -437,7 +437,7 @@
 
                         <TextBlock Text="Comandi" FontSize="14" FontWeight="Bold" Margin="0,16,0,6"/>
                         <TextBlock TextWrapping="Wrap" FontSize="11" Foreground="#4B5563"
-                                   Text="Rotella: zoom – Tasto centrale: pan – Selettore: clic per selezionare, trascina nel vuoto per selezionare con un rettangolo (sinistra→destra: oggetti interi, destra→sinistra: anche quelli toccati; Ctrl/Maiusc aggiunge), trascina un oggetto per spostarlo, trascina i quadratini per modificare i punti – Tasto destro: sulle forme selezionate salva in file, su un punto vuoto importa da file – Tutte le coordinate sono in mm, con origine nell'angolo in alto a sinistra del foglio (Y verso il basso) – Esc: annulla o deseleziona – Canc: elimina l'entità selezionata – F: adatta il foglio alla finestra – C/W/J/T/G: componente, filo, giunzione, testo, guaina – Mentre traccio linee, archi, fili o guaine: Spazio tenuto premuto vincola a 0°/45°/90°; nel filo X inverte il gomito – Ctrl+Z/Y: annulla/ripeti, Ctrl+C/V: copia/incolla, Ctrl+R: ruota, Ctrl+M: specchia, Ctrl+S: salva progetto."/>
+                                   Text="Rotella: zoom – Tasto centrale: pan – Selettore: clic per selezionare, trascina nel vuoto per selezionare con un rettangolo (sinistra→destra: oggetti interi, destra→sinistra: anche quelli toccati; Ctrl/Maiusc aggiunge), trascina un oggetto per spostarlo, trascina i quadratini per modificare i punti – Tasto destro: sulle forme selezionate salva in file, su un punto vuoto importa da file – Tutte le coordinate sono in mm, con origine nell'angolo in alto a sinistra del foglio (Y verso il basso) – Esc: annulla o deseleziona – Canc: elimina l'entità selezionata – F: adatta il foglio alla finestra – C/W/J/T/G: componente, filo, giunzione, testo, fascio – Mentre traccio linee, archi, fili o fasci: Spazio tenuto premuto vincola a 0°/45°/90°; nel filo X inverte il gomito – Ctrl+Z/Y: annulla/ripeti, Ctrl+C/V: copia/incolla, Ctrl+R: ruota, Ctrl+M: specchia, Ctrl+S: salva progetto."/>
                     </StackPanel>
                 </ScrollViewer>
             </Border>

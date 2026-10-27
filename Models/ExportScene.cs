@@ -149,7 +149,7 @@ public static class SceneBuilder
             case TableEntity:
                 return "TABELLE";
             case SheathEntity:
-                return "GUAINE";
+                return "FASCI";
             case TextEntity:
                 return "TESTI";
             case DimensionEntity:
@@ -212,7 +212,48 @@ public static class SceneBuilder
                         }
                     }
                 }
-                AddGeometry(scene, entity, layer);
+                if (entity is not SheathEntity { IsTwisted: true })
+                {
+                    AddGeometry(scene, entity, layer);
+                }
+                if (entity is SheathEntity { IsFerrite: true } ferrite)
+                {
+                    foreach (SheathEntity.FerriteLayer part in ferrite.FerriteLayers())
+                    {
+                        scene.Polylines.Add(new ExportPolyline(part.Polygon, true, true, part.Fill, 0.01, layer, part.Fill, part.Opacity));
+                    }
+                }
+                if (entity is SheathEntity { IsTwisted: true } twisted)
+                {
+                    SheathEntity.TwistLayout layout = twisted.BuildTwist();
+
+                    void AddShape(SheathEntity.TwistShape shape)
+                    {
+                        (string primary, string? secondary) = twisted.StrandColors(shape.Strand);
+                        scene.Polylines.Add(new ExportPolyline(shape.Body, true, true, primary, 0.01, layer, primary, 1));
+                        foreach (List<Point> strip in shape.Edges)
+                        {
+                            scene.Polylines.Add(new ExportPolyline(strip, true, true, "#374151", 0.01, layer, "#374151", 1));
+                        }
+                        if (secondary != null)
+                        {
+                            foreach (List<Point> stripe in shape.Stripes)
+                            {
+                                scene.Polylines.Add(new ExportPolyline(stripe, true, true, secondary, 0.01, layer, secondary, 1));
+                            }
+                        }
+                    }
+
+                    // prima i fili interi, poi i tratti dal più lontano al più vicino (sopra/sotto agli incroci)
+                    foreach (SheathEntity.TwistShape shape in layout.Strands)
+                    {
+                        AddShape(shape);
+                    }
+                    foreach (SheathEntity.TwistShape shape in layout.Chunks)
+                    {
+                        AddShape(shape);
+                    }
+                }
                 if (entity is SheathEntity layered && layered.InnerLayerGeometry() is Geometry innerLayer)
                 {
                     List<Shape> layerShapes = new();
@@ -224,10 +265,11 @@ public static class SceneBuilder
                             "#374151", 0.35, layer, layered.InnerFillHex, 1));
                     }
                 }
-                if (entity is SheathEntity { WireCount: > 0 } sheath && sheath.Inside != SheathEntity.InsideHidden)
+                if (entity is SheathEntity { WireCount: > 0, IsTwisted: false } sheath
+                    && sheath.Inside != SheathEntity.InsideHidden)
                 {
                     string innerColor = sheath.Inside == SheathEntity.InsideVisible ? "#374151" : "#9CA3AF";
-                    foreach (List<Point> line in sheath.InnerLines(SheathAnalyzer.UsedLinks(sheath, entities.OfType<WireEntity>())))
+                    foreach (List<Point> line in sheath.InnerLines(SheathAnalyzer.UsedLinks(sheath, entities.OfType<WireEntity>(), entities.OfType<SheathEntity>())))
                     {
                         if (line.Count >= 2)
                         {

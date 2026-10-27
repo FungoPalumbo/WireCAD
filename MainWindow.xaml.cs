@@ -161,6 +161,7 @@ public partial class MainWindow : Window
         CancelWire();
         CancelFillet();
         _sheathPoints.Clear();
+        _attachParent = null;
         _splinePoints.Clear();
         _snapMarker.Visibility = Visibility.Collapsed;
         _previewPath.Visibility = Visibility.Collapsed;
@@ -191,7 +192,7 @@ public partial class MainWindow : Window
             ToolType.Wire => "Filo: clic su un pin per iniziare, clic per i vertici (instradamento ortogonale), clic su un pin o doppio clic/Invio/tasto destro per terminare. Tieni premuto Spazio per vincolare a 0°/45°/90°; X inverte il gomito. Esc annulla.",
             ToolType.Junction => "Giunzione: clic per posizionarla (si aggancia ai fili). Tasto destro: torna al selettore.",
             ToolType.Text => "Testo: clic per posizionare, poi digita il testo. Tasto destro: torna al selettore.",
-            ToolType.Sheath => "Guaina: clic sull'inizio, clic per i vertici (curve), doppio clic, Invio o tasto destro per terminare. Tieni premuto Spazio per vincolare a 0°/45°/90°. Esc annulla.",
+            ToolType.Sheath => "Fascio: clic sull'inizio, clic per i vertici (curve), doppio clic, Invio o tasto destro per terminare. Un clic sul corpo di un fascio esistente e poi un secondo clic creano un fascio lungo di esso. Tieni premuto Spazio per vincolare a 0°/45°/90°. Esc annulla.",
             ToolType.Pin => "Pin: clic per posizionarlo (numero 1, modificabile dalle proprietà). Fili e linee si agganciano ai pin.",
             ToolType.PlaceImport => "Importazione: clic sul foglio per posizionare il disegno (angolo in alto a sinistra). Esc o tasto destro annullano.",
             ToolType.Circle => "Cerchio: clic sul centro, poi clic su un punto della circonferenza.",
@@ -551,6 +552,11 @@ public partial class MainWindow : Window
             case ToolType.Junction:
                 geometry = new JunctionEntity { Position = cursor }.BuildGeometry();
                 break;
+            case ToolType.Sheath when _attachParent != null:
+                geometry = _attachParent.TryProject(cursor, out double previewAlong, out _)
+                    ? SheathEntity.CreateAttached(_attachParent, _attachFrom, previewAlong, 1.2).BuildGeometry()
+                    : null;
+                break;
             case ToolType.Sheath when _sheathPoints.Count >= 1:
                 geometry = BuildSheathPreview(cursor);
                 break;
@@ -638,9 +644,22 @@ public partial class MainWindow : Window
         {
             return;
         }
+        if (entity is SheathEntity { ParentId: Guid parentId } attached
+            && _byId.TryGetValue(parentId, out EntityBase? baseEntity) && baseEntity is SheathEntity baseSheath)
+        {
+            attached.FollowParent(baseSheath);
+        }
         path.Data = entity.BuildGeometry();
         ApplyStyle(entity);
         ScheduleLabels();
+        if (entity is SheathEntity parentSheath)
+        {
+            // le guaine disposte lungo questa seguono le sue modifiche
+            foreach (SheathEntity child in _entities.OfType<SheathEntity>().Where(item => item.ParentId == parentSheath.Id).ToList())
+            {
+                child.RefreshGeometry();
+            }
+        }
         if (entity.PinCount > 0)
         {
             SyncWiresTo(entity);
@@ -713,6 +732,7 @@ public partial class MainWindow : Window
         {
             UpdateSheathLayer(sheathEntity);
             UpdateSheathInner(sheathEntity);
+            UpdateTwist(sheathEntity);
         }
         else if (entity is ComponentEntity componentEntity)
         {
@@ -738,24 +758,7 @@ public partial class MainWindow : Window
         UpdateTreeMarks();
 
         EntityBase? primary = PrimarySelection;
-        _currentFields = primary?.GetFields();
-        if (_currentFields != null)
-        {
-            foreach (EntityField field in _currentFields)
-            {
-                field.Owner = primary;
-            }
-        }
-        FieldsList.ItemsSource = _currentFields;
-        _currentTextFields = primary?.GetTextFields();
-        if (_currentTextFields != null)
-        {
-            foreach (TextField field in _currentTextFields)
-            {
-                field.Owner = primary;
-            }
-        }
-        TextFieldsList.ItemsSource = _currentTextFields;
+        BindFieldLists(primary);
         NameBox.DataContext = primary;
         NameShowBox.DataContext = primary;
         LabelShowBox.DataContext = primary;
@@ -788,8 +791,41 @@ public partial class MainWindow : Window
         }
     }
 
+    /// <summary>Elenca nel pannello le proprietà (numeriche e testuali) dell'oggetto principale.</summary>
+    private void BindFieldLists(EntityBase? primary)
+    {
+        _currentFields = primary?.GetFields();
+        if (_currentFields != null)
+        {
+            foreach (EntityField field in _currentFields)
+            {
+                field.Owner = primary;
+            }
+        }
+        FieldsList.ItemsSource = _currentFields;
+        _currentTextFields = primary?.GetTextFields();
+        if (_currentTextFields != null)
+        {
+            foreach (TextField field in _currentTextFields)
+            {
+                field.Owner = primary;
+            }
+        }
+        TextFieldsList.ItemsSource = _currentTextFields;
+    }
+
     private void RefreshFields()
     {
+        // le proprietà di un fascio dipendono dal suo tipo: se cambia il numero di campi si ricostruisce l'elenco
+        if (PrimarySelection is SheathEntity sheath
+            && (_currentFields == null
+                || _currentTextFields == null
+                || sheath.GetFields().Count != _currentFields.Count
+                || sheath.GetTextFields().Count != _currentTextFields.Count))
+        {
+            BindFieldLists(sheath);
+            return;
+        }
         if (_currentFields != null)
         {
             foreach (EntityField field in _currentFields)

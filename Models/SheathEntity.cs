@@ -37,6 +37,495 @@ public class SheathEntity : EntityBase
 
     private string _innerColor = "Grigio";
 
+    public const string TwistedType = "Filo twistato";
+
+    private string _twistColors = "";
+    private double _twistPitch;
+
+    /// <summary>Vero se il tracciato rappresenta fili twistati (intrecciati) invece di una guaina.</summary>
+    public bool IsTwisted => _type.Contains("twist", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Colori dei fili intrecciati, separati da virgole (nomi della tavolozza); vuoto = colori predefiniti.</summary>
+    public string TwistColors
+    {
+        get => _twistColors;
+        set => SetField(ref _twistColors, value);
+    }
+
+    /// <summary>Passo dell'intreccio (mm) lungo il tracciato; 0 = automatico.</summary>
+    public double TwistPitch
+    {
+        get => _twistPitch;
+        set
+        {
+            _twistPitch = Math.Clamp(value, 0, 1000);
+            NotifyChanged();
+        }
+    }
+
+    public const string FerriteType = "Ferrite";
+
+    private string _rating = "";
+
+    /// <summary>Vero se il tracciato rappresenta una ferrite (corpo rigido scuro con scanalature).</summary>
+    public bool IsFerrite => _type.Contains("ferrite", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Impedenza o altro valore caratteristico (per le ferriti).</summary>
+    public string Rating
+    {
+        get => _rating;
+        set => SetField(ref _rating, value);
+    }
+
+    // ---------------------------------------------------------------- guaina annidata in un'altra
+
+    /// <summary>Guaina base lungo il cui tracciato è disposta questa guaina; null se è libera.</summary>
+    public Guid? ParentId { get; set; }
+
+    /// <summary>Ascissa (mm lungo l'asse della guaina base) dell'inizio e della fine del tratto occupato.</summary>
+    public double ParentFrom { get; set; }
+
+    public double ParentTo { get; set; }
+
+    /// <summary>Vero se la guaina segue il tracciato di un'altra (e si sposta con essa).</summary>
+    public bool IsAttached => ParentId != null;
+
+    /// <summary>Lunghezza dell'asse (mm), per valutare le ascisse sulla guaina base.</summary>
+    public double CenterLength => PathLength(CenterLine());
+
+    /// <summary>Proietta un punto sull'asse: ascissa curvilinea e distanza dall'asse.</summary>
+    public bool TryProject(Point point, out double along, out double distance)
+    {
+        along = 0;
+        distance = double.MaxValue;
+        IReadOnlyList<Point> center = CenterLine();
+        double cumulative = 0;
+        for (int i = 0; i + 1 < center.Count; i++)
+        {
+            Vector segment = center[i + 1] - center[i];
+            double length = segment.Length;
+            if (length < 1e-12)
+            {
+                continue;
+            }
+            double t = Math.Clamp(((point - center[i]) * segment) / (length * length), 0, 1);
+            double d = (point - (center[i] + segment * t)).Length;
+            if (d < distance)
+            {
+                distance = d;
+                along = cumulative + t * length;
+            }
+            cumulative += length;
+        }
+        return distance < double.MaxValue;
+    }
+
+    /// <summary>Riallinea il tracciato a quello della guaina base, tra le ascisse memorizzate.</summary>
+    public void FollowParent(SheathEntity parent)
+    {
+        IReadOnlyList<Point> center = parent.CenterLine();
+        double total = PathLength(center);
+        double from = Math.Clamp(Math.Min(ParentFrom, ParentTo), 0, total);
+        double to = Math.Clamp(Math.Max(ParentFrom, ParentTo), 0, total);
+        List<Point> sub = SubPath(center, from, to);
+        if (sub.Count >= 2)
+        {
+            _points = sub;
+            _bendRadius = 0;
+        }
+    }
+
+    /// <summary>Crea una guaina disposta lungo il tracciato della guaina base, tra le due ascisse.</summary>
+    public static SheathEntity CreateAttached(SheathEntity parent, double from, double to, double widthFactor)
+    {
+        SheathEntity child = new(new[] { new Point(0, 0), new Point(1, 0) })
+        {
+            ParentId = parent.Id,
+            ParentFrom = Math.Min(from, to),
+            ParentTo = Math.Max(from, to),
+            BendRadius = 0
+        };
+        child.DrawnWidth = Math.Max(0.5, parent.DrawWidth * widthFactor);
+        child.FollowParent(parent);
+        return child;
+    }
+
+    public override void RemapReferences(Func<Guid, Guid?> map)
+    {
+        if (ParentId is Guid id)
+        {
+            ParentId = map(id);
+        }
+    }
+
+    /// <summary>Numero di fili intrecciati: quelli della guaina con pin, altrimenti due.</summary>
+    public int StrandCount => _wireCount > 0 ? _wireCount : 2;
+
+    /// <summary>Larghezza con cui è disegnato ciascun filo dell'intreccio.</summary>
+    public double StrandWidth
+    {
+        get
+        {
+            double widest = 0;
+            for (int k = 0; k < StrandCount; k++)
+            {
+                widest = Math.Max(widest, StrandWidthOf(k));
+            }
+            return widest;
+        }
+    }
+
+    /// <summary>Spessori (disegnati) dei fili collegati ai pin, calcolati dalla finestra; 0 dove non c'è un filo collegato.</summary>
+    public IReadOnlyList<double> AutoStrandWidths { get; set; } = Array.Empty<double>();
+
+    /// <summary>
+    /// Spessore del filo indicato: quello del filo collegato al suo pin; senza filo collegato, quello del filo collegato più
+    /// spesso, oppure (se non ce ne sono) un valore ricavato dalla larghezza della guaina.
+    /// </summary>
+    public double StrandWidthOf(int index)
+    {
+        if (index >= 0 && index < AutoStrandWidths.Count && AutoStrandWidths[index] > 0)
+        {
+            return AutoStrandWidths[index];
+        }
+        double known = AutoStrandWidths.Count > 0 ? AutoStrandWidths.Max() : 0;
+        return known > 0 ? known : Math.Max(0.3, DrawWidth / (1 + StrandCount / 2.0));
+    }
+
+    /// <summary>Distanza dall'asse del filo indicato nel punto di massimo scostamento: fili tondi a contatto fra loro.</summary>
+    private double StrandAmplitudeOf(int index)
+    {
+        int count = StrandCount;
+        double width = StrandWidthOf(index);
+        // il margine fa sì che i contorni di due fili non si sovrappongano nel punto di massimo scostamento,
+        // dove cambia quale dei due sta sopra: così il cambio non si nota
+        return count > 1 ? width / (2 * Math.Sin(Math.PI / count)) + Math.Clamp(width * 0.25, 0.15, 0.5) : 0;
+    }
+
+    /// <summary>Colore (esadecimale) del filo indicato dell'intreccio.</summary>
+    public string StrandColor(int index) => StrandColors(index).Primary;
+
+    /// <summary>
+    /// Colori del filo indicato: quelli scelti a mano ("Rosso" oppure "Rosso/Bianco" per un filo bicolore) oppure, se vuoti,
+    /// quelli del filo collegato al pin corrispondente; senza fili collegati il filo è bianco.
+    /// </summary>
+    public (string Primary, string? Secondary) StrandColors(int index)
+    {
+        string[] names = _twistColors.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (index < names.Length)
+        {
+            string[] parts = names[index].Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            string? first = parts.Length > 0 ? ColorPalette.Resolve(parts[0]) : null;
+            string? second = parts.Length > 1 ? ColorPalette.Resolve(parts[1]) : null;
+            if (first != null)
+            {
+                return (first, second);
+            }
+        }
+        string? connected = index < AutoStrandColors.Count ? AutoStrandColors[index] : null;
+        string? connectedSecond = index < AutoStrandColors2.Count ? AutoStrandColors2[index] : null;
+        return connected == null ? ("#FFFFFF", null) : (connected, connectedSecond);
+    }
+
+    /// <summary>Colori dei fili collegati ai pin (calcolati dalla finestra, non salvati); null dove non c'è un filo colorato.</summary>
+    public IReadOnlyList<string?> AutoStrandColors { get; set; } = Array.Empty<string?>();
+
+    /// <summary>Secondo colore dei fili collegati ai pin, per quelli bicolore.</summary>
+    public IReadOnlyList<string?> AutoStrandColors2 { get; set; } = Array.Empty<string?>();
+
+    /// <summary>Strato dell'aspetto di una ferrite: poligono, colore di riempimento e opacità.</summary>
+    public sealed record FerriteLayer(List<Point> Polygon, string Fill, double Opacity);
+
+    private static List<Point> Band(IReadOnlyList<Point> center, double from, double to)
+    {
+        List<Point> upper = SceneBuilder.OffsetPolyline(center, to);
+        List<Point> lower = SceneBuilder.OffsetPolyline(center, from);
+        lower.Reverse();
+        upper.AddRange(lower);
+        return upper;
+    }
+
+    private static string ScaleColor(string hex, double factor)
+    {
+        string value = hex.TrimStart('#');
+        int rgb = int.Parse(value, NumberStyles.HexNumber, CultureInfo.InvariantCulture);
+        int r = Math.Clamp((int)Math.Round(((rgb >> 16) & 255) * factor), 0, 255);
+        int g = Math.Clamp((int)Math.Round(((rgb >> 8) & 255) * factor), 0, 255);
+        int b = Math.Clamp((int)Math.Round((rgb & 255) * factor), 0, 255);
+        return $"#{r:X2}{g:X2}{b:X2}";
+    }
+
+    /// <summary>
+    /// Aspetto di una ferrite cilindrica vista di lato: il corpo è diviso in strisce parallele all'asse, più chiare dove la
+    /// luce (da un lato) colpisce il cilindro e più scure verso il bordo, con un riflesso lucido, le smussature alle due
+    /// estremità e le sottili linee di separazione. Segue il tracciato anche se curvo. Vuoto se non è una ferrite.
+    /// </summary>
+    public List<FerriteLayer> FerriteLayers()
+    {
+        List<FerriteLayer> layers = new();
+        IReadOnlyList<Point> center = CenterLine();
+        if (!IsFerrite || center.Count < 2)
+        {
+            return layers;
+        }
+        double half = DrawWidth / 2;
+        double length = PathLength(center);
+        // grigio-nero opaco dei nuclei in ferrite; con un colore scelto a mano il corpo prende quella tinta
+        string baseHex = _color == "Nero" || ColorPalette.Resolve(_color) is not string chosen ? "#4B5563" : chosen;
+
+        // la luce arriva da in alto a sinistra: il lato illuminato dipende dalla direzione del fascio
+        Vector direction = center[center.Count - 1] - center[0];
+        Vector normal = new(-direction.Y, direction.X);
+        double lightSide = normal.X + normal.Y >= 0 ? -0.35 : 0.35;
+        // sotto le strisce un corpo pieno: nasconde le sottili righe che l'antialiasing lascia tra strisce vicine
+        layers.Add(new FerriteLayer(Band(center, -half, half), ScaleColor(baseHex, 0.7), 1));
+        const int bands = 13;
+        double lightAngle = Math.Asin(lightSide);
+        for (int i = 0; i < bands; i++)
+        {
+            double from = -1.0 + 2.0 * i / bands;
+            double to = -1.0 + 2.0 * (i + 1) / bands;
+            double lambert = Math.Max(0, Math.Cos(Math.Asin((from + to) / 2) - lightAngle));
+            layers.Add(new FerriteLayer(Band(center, from * half, to * half), ScaleColor(baseHex, 0.35 + 0.95 * lambert), 1));
+        }
+
+        double cap = Math.Min(Math.Max(DrawWidth * 0.2, 0.8), length / 4);
+        double seam = Math.Max(0.25, DrawWidth * 0.035);
+        foreach ((double a, double b) in new[] { (0.0, cap), (length - cap, length) })
+        {
+            List<Point> end = SubPath(center, a, b);
+            if (end.Count >= 2)
+            {
+                // estremità smussata: leggermente più chiara del corpo
+                layers.Add(new FerriteLayer(Band(end, -half, half), "#FFFFFF", 0.14));
+            }
+        }
+        foreach (double at in new[] { cap, length - cap })
+        {
+            List<Point> joint = SubPath(center, at - seam / 2, at + seam / 2);
+            if (joint.Count >= 2)
+            {
+                layers.Add(new FerriteLayer(Band(joint, -half, half), "#000000", 0.5));
+            }
+        }
+        // riflesso lucido lungo il cilindro
+        layers.Add(new FerriteLayer(Band(center, (lightSide - 0.08) * half, (lightSide + 0.08) * half), "#FFFFFF", 0.22));
+        return layers;
+    }
+
+    /// <summary>
+    /// Forma di un filo dell'intreccio (o di un suo tratto) come poligoni chiusi: il contorno scuro, il corpo colorato e le
+    /// eventuali strisce del secondo colore. <see cref="Rank"/> è la posizione in profondità (0 = il più lontano).
+    /// </summary>
+    public sealed record TwistShape(int Strand, int Rank, List<List<Point>> Edges, List<Point> Body, List<List<Point>> Stripes);
+
+    /// <summary>Intreccio: i fili interi e i loro tratti, ordinati dal rango più basso al più alto.</summary>
+    public sealed record TwistLayout(List<TwistShape> Strands, List<TwistShape> Chunks);
+
+    private static List<Point> Ribbon(Point[] left, Point[] right, int from, int to)
+    {
+        List<Point> polygon = new(2 * (to - from + 1));
+        for (int i = from; i <= to; i++)
+        {
+            polygon.Add(left[i]);
+        }
+        for (int i = to; i >= from; i--)
+        {
+            polygon.Add(right[i]);
+        }
+        return polygon;
+    }
+
+    private static Point Interpolate(Point[] points, double[] distance, double at)
+    {
+        double step = distance[1] - distance[0];
+        int i = Math.Clamp((int)Math.Floor((at - distance[0]) / step), 0, points.Length - 2);
+        double t = Math.Clamp((at - distance[i]) / step, 0, 1);
+        return points[i] + (points[i + 1] - points[i]) * t;
+    }
+
+    /// <summary>Parte del nastro compresa tra due distanze lungo il filo; null se troppo corta.</summary>
+    private static List<Point>? RibbonSlice(Point[] left, Point[] right, double[] distance, double from, double to)
+    {
+        from = Math.Max(from, distance[0]);
+        to = Math.Min(to, distance[distance.Length - 1]);
+        if (to - from < 1e-6)
+        {
+            return null;
+        }
+        List<Point> l = new() { Interpolate(left, distance, from) };
+        List<Point> r = new() { Interpolate(right, distance, from) };
+        for (int i = 0; i < distance.Length; i++)
+        {
+            if (distance[i] > from + 1e-9 && distance[i] < to - 1e-9)
+            {
+                l.Add(left[i]);
+                r.Add(right[i]);
+            }
+        }
+        l.Add(Interpolate(left, distance, to));
+        r.Add(Interpolate(right, distance, to));
+        r.Reverse();
+        l.AddRange(r);
+        return l;
+    }
+
+    /// <summary>
+    /// Fili dell'intreccio (sinusoidi sfasate lungo l'asse) come poligoni. Disegnando prima i fili interi e poi i tratti, dal
+    /// rango più basso al più alto, ai punti d'incrocio un filo passa sopra e l'altro sotto, in alternanza, come in un
+    /// intreccio vero. I tratti hanno i bordi in comune e sotto c'è il filo intero: le giunzioni non si vedono.
+    /// <paramref name="extraEdge"/> allarga il contorno (per l'evidenziazione della selezione).
+    /// Alle estremità i fili tornano alla posizione dei pin, per raccordarsi ai fili collegati. Vuoto se non è twistato.
+    /// </summary>
+    public TwistLayout BuildTwist(double extraEdge = 0)
+    {
+        List<TwistShape> strandShapes = new();
+        List<TwistShape> chunks = new();
+        TwistLayout empty = new(strandShapes, chunks);
+        IReadOnlyList<Point> center = CenterLine();
+        if (!IsTwisted || center.Count < 2)
+        {
+            return empty;
+        }
+        PathSampler sampler = new(center);
+        double length = sampler.Length;
+        if (length < 1)
+        {
+            return empty;
+        }
+        int count = StrandCount;
+        double pitch = _twistPitch > 0 ? _twistPitch : Math.Max(StrandWidth * 8, 6);
+        double ramp = Math.Min(pitch, length / 3);
+        int steps = (int)Math.Clamp(Math.Ceiling(length / (pitch / 16)), 2, 1500);
+        Point[][] lines = new Point[count][];
+        double[][] depths = new double[count][];
+        double[] distance = new double[steps + 1];
+        for (int i = 0; i <= steps; i++)
+        {
+            distance[i] = length * i / steps;
+        }
+        for (int k = 0; k < count; k++)
+        {
+            double amplitude = StrandAmplitudeOf(k);
+            double endOffset = _wireCount > 0
+                ? PinOffset(k)
+                : count > 1 ? -amplitude + 2 * amplitude * k / (count - 1) : 0;
+            lines[k] = new Point[steps + 1];
+            depths[k] = new double[steps + 1];
+            for (int i = 0; i <= steps; i++)
+            {
+                double s = distance[i];
+                double t = Math.Clamp(Math.Min(s, length - s) / ramp, 0, 1);
+                double blend = t * t * (3 - 2 * t);
+                double phase = 2 * Math.PI * s / pitch + 2 * Math.PI * k / count;
+                lines[k][i] = sampler.At(s, endOffset * (1 - blend) + amplitude * Math.Sin(phase) * blend);
+                // nei tratti di raccordo alle estremità l'ordine sopra/sotto resta quello fissato all'inizio dell'intreccio:
+                // lì i fili sono vicini e un cambio d'ordine si vedrebbe come un taglio
+                double settled = Math.Clamp(s, ramp, length - ramp);
+                depths[k][i] = Math.Cos(2 * Math.PI * settled / pitch + 2 * Math.PI * k / count);
+            }
+        }
+
+        // bordi del nastro di ogni filo: le stesse coppie di punti sono usate da tutti i tratti vicini, così combaciano
+        Point[][] bodyLeft = new Point[count][];
+        Point[][] bodyRight = new Point[count][];
+        Point[][] edgeLeft = new Point[count][];
+        Point[][] edgeRight = new Point[count][];
+        string?[] secondary = new string?[count];
+        double[] stripeLength = new double[count];
+        for (int k = 0; k < count; k++)
+        {
+            double width = StrandWidthOf(k);
+            double bodyHalf = width / 2;
+            double edgeHalf = (width + Math.Clamp(width * 0.25, 0.15, 0.5) + extraEdge) / 2;
+            secondary[k] = StrandColors(k).Secondary;
+            stripeLength[k] = Math.Max(width * 3, 2);
+            bodyLeft[k] = new Point[steps + 1];
+            bodyRight[k] = new Point[steps + 1];
+            edgeLeft[k] = new Point[steps + 1];
+            edgeRight[k] = new Point[steps + 1];
+            Vector normal = new(0, 1);
+            for (int i = 0; i <= steps; i++)
+            {
+                Vector direction = lines[k][Math.Min(i + 1, steps)] - lines[k][Math.Max(i - 1, 0)];
+                if (direction.Length > 1e-9)
+                {
+                    direction.Normalize();
+                    normal = new Vector(-direction.Y, direction.X);
+                }
+                bodyLeft[k][i] = lines[k][i] + normal * bodyHalf;
+                bodyRight[k][i] = lines[k][i] - normal * bodyHalf;
+                edgeLeft[k][i] = lines[k][i] + normal * edgeHalf;
+                edgeRight[k][i] = lines[k][i] - normal * edgeHalf;
+            }
+        }
+
+        TwistShape MakeShape(int k, int from, int to, int rank)
+        {
+            List<List<Point>> stripes = new();
+            if (secondary[k] != null)
+            {
+                double step = stripeLength[k];
+                for (int m = (int)Math.Floor(distance[from] / step); m * step < distance[to]; m++)
+                {
+                    if (m % 2 != 0 && RibbonSlice(bodyLeft[k], bodyRight[k], distance, Math.Max(m * step, distance[from]),
+                        Math.Min((m + 1) * step, distance[to])) is List<Point> stripe)
+                    {
+                        stripes.Add(stripe);
+                    }
+                }
+            }
+            // il contorno è fatto di due strisce ai lati del corpo (non di un nastro pieno sotto di esso): così le giunzioni tra
+            // tratti vicini mostrano il corpo del filo intero sottostante e non una riga scura
+            List<List<Point>> edges = new()
+            {
+                Ribbon(edgeLeft[k], bodyLeft[k], from, to),
+                Ribbon(bodyRight[k], edgeRight[k], from, to)
+            };
+            return new TwistShape(k, rank, edges, Ribbon(bodyLeft[k], bodyRight[k], from, to), stripes);
+        }
+
+        for (int k = 0; k < count; k++)
+        {
+            strandShapes.Add(MakeShape(k, 0, steps, 0));
+        }
+
+        // rango (posizione in profondità) di ogni filo in ogni tratto tra due campioni
+        int[][] ranks = new int[count][];
+        for (int k = 0; k < count; k++)
+        {
+            ranks[k] = new int[steps];
+        }
+        for (int j = 0; j < steps; j++)
+        {
+            int segment = j;
+            // a pari profondità (estremità) resta l'ordine dei fili
+            int[] order = Enumerable.Range(0, count)
+                .OrderBy(strand => depths[strand][segment] + depths[strand][segment + 1])
+                .ThenBy(strand => strand)
+                .ToArray();
+            for (int position = 0; position < count; position++)
+            {
+                ranks[order[position]][j] = position;
+            }
+        }
+
+        for (int k = 0; k < count; k++)
+        {
+            int first = 0;
+            for (int j = 1; j <= steps; j++)
+            {
+                if (j < steps && ranks[k][j] == ranks[k][first])
+                {
+                    continue;
+                }
+                chunks.Add(MakeShape(k, first, j, ranks[k][first]));
+                first = j;
+            }
+        }
+        return new TwistLayout(strandShapes, chunks.OrderBy(chunk => chunk.Rank).ToList());
+    }
+
     /// <summary>Colore dello strato interno scoperto (indipendente da quello della guaina); grigio di default.</summary>
     public string InnerColor
     {
@@ -237,7 +726,7 @@ public class SheathEntity : EntityBase
         return SceneBuilder.OffsetPolyline(center, PinOffset(link));
     }
 
-    public override string TypeName => "Guaina";
+    public override string TypeName => "Fascio";
 
     public override string TypeKey => "sheath";
 
@@ -245,13 +734,22 @@ public class SheathEntity : EntityBase
 
     public override double LineWidth => 0.35;
 
-    public override string? FillHex => ColorPalette.Resolve(_color) ?? "#374151";
+    /// <summary>I fili twistati non hanno rettangolo esterno: si vedono (e si evidenziano) solo i fili.</summary>
+    public override bool HasOutline => !IsTwisted;
+
+    public override string? FillHex =>
+        IsTwisted || IsFerrite ? null : IsFerrite && (string.IsNullOrEmpty(_color) || _color == "Nero" || ColorPalette.Resolve(_color) == null)
+            ? "#6B7280"
+            : ColorPalette.Resolve(_color) ?? "#374151";
 
     // ---------------------------------------------------------------- pin della calza
 
-    private bool ShieldAtStart => _innerLayer == InnerCalza && _stripStart > 0;
+    /// <summary>La sguainatura con calza scoperta riguarda solo le guaine vere: non i fili twistati né le ferriti.</summary>
+    private bool CanStrip => !IsTwisted && !IsFerrite;
 
-    private bool ShieldAtEnd => _innerLayer == InnerCalza && _stripEnd > 0;
+    private bool ShieldAtStart => CanStrip && _innerLayer == InnerCalza && _stripStart > 0;
+
+    private bool ShieldAtEnd => CanStrip && _innerLayer == InnerCalza && _stripEnd > 0;
 
     /// <summary>Numero di pin della calza (uno per ogni capo sguainato con calza scoperta).</summary>
     public int ShieldPinCount => (ShieldAtStart ? 1 : 0) + (ShieldAtEnd ? 1 : 0);
@@ -384,7 +882,7 @@ public class SheathEntity : EntityBase
     /// </summary>
     public Geometry? InnerGeometry(IReadOnlyList<bool>? used = null)
     {
-        if (_wireCount <= 0)
+        if (_wireCount <= 0 || IsTwisted)
         {
             return null;
         }
@@ -422,7 +920,7 @@ public class SheathEntity : EntityBase
     {
         List<List<Point>> lines = new();
         IReadOnlyList<Point> center = CenterLine();
-        if (_wireCount <= 0 || center.Count < 2)
+        if (_wireCount <= 0 || IsTwisted || center.Count < 2)
         {
             return lines;
         }
@@ -441,6 +939,10 @@ public class SheathEntity : EntityBase
     {
         get
         {
+            if (IsFerrite)
+            {
+                return 0.9;
+            }
             if (_wireCount > 0)
             {
                 return 0.15;
@@ -599,6 +1101,10 @@ public class SheathEntity : EntityBase
     /// <summary>Lunghezze di sguainatura effettive, ridotte se insieme superano il tracciato.</summary>
     private (double Start, double End) StripLengths(double total)
     {
+        if (!CanStrip)
+        {
+            return (0, 0);
+        }
         double start = Math.Max(0, _stripStart);
         double end = Math.Max(0, _stripEnd);
         double available = total - 1;
@@ -619,7 +1125,7 @@ public class SheathEntity : EntityBase
     private IReadOnlyList<Point> OuterCenterLine()
     {
         IReadOnlyList<Point> full = CenterLine();
-        if (full.Count < 2 || (_stripStart <= 0 && _stripEnd <= 0))
+        if (full.Count < 2 || !CanStrip || (_stripStart <= 0 && _stripEnd <= 0))
         {
             return full;
         }
@@ -630,7 +1136,7 @@ public class SheathEntity : EntityBase
     }
 
     private bool HasInnerLayer =>
-        (_innerLayer == InnerCalza || _innerLayer == InnerTube) && (_stripStart > 0 || _stripEnd > 0);
+        CanStrip && (_innerLayer == InnerCalza || _innerLayer == InnerTube) && (_stripStart > 0 || _stripEnd > 0);
 
     /// <summary>Larghezza disegnata dello strato interno (calza).</summary>
     private double InnerWidth => DrawWidth * Math.Clamp(_innerPercent, 20, 100) / 100;
@@ -699,6 +1205,11 @@ public class SheathEntity : EntityBase
     /// </summary>
     private void AddPattern(PathGeometry geometry)
     {
+        if (IsFerrite)
+        {
+            // l'aspetto della ferrite è disegnato a parte (FerriteLayers)
+            return;
+        }
         bool braided = _type.Contains("treccia", StringComparison.OrdinalIgnoreCase);
         bool corrugated = _type.Contains("corrugat", StringComparison.OrdinalIgnoreCase);
         if (!braided && !corrugated)
@@ -888,7 +1399,7 @@ public class SheathEntity : EntityBase
         Point a = _points[best];
         Point b = _points[best + 1];
         Point mid = new((a.X + b.X) / 2, (a.Y + b.Y) / 2);
-        string strip = _stripStart > 0 || _stripEnd > 0 ? $"  sguain. {_stripStart:0.#}/{_stripEnd:0.#}" : string.Empty;
+        string strip = CanStrip && (_stripStart > 0 || _stripEnd > 0) ? $"  sguain. {_stripStart:0.#}/{_stripEnd:0.#}" : string.Empty;
         string text = $"{_tag}  {_type}  Ø{_diameter:0.#}  {EffectiveLength:0} mm{strip}";
         if (ShowLabel)
         {
@@ -910,16 +1421,39 @@ public class SheathEntity : EntityBase
 
     public override IReadOnlyList<EntityField> GetFields()
     {
+        // le proprietà dipendono dal tipo: sguainatura e calza solo per le guaine, il passo solo per i twistati
         List<EntityField> fields = new()
         {
             new EntityField("Diametro reale", () => Diameter, v => Diameter = v),
             new EntityField("Larghezza nel disegno (0 = auto)", () => DrawnWidth, v => DrawnWidth = v),
-            new EntityField("Raggio curve", () => BendRadius, v => BendRadius = v),
-            new EntityField("Sguainatura inizio", () => StripStart, v => StripStart = v),
-            new EntityField("Sguainatura fine", () => StripEnd, v => StripEnd = v),
-            new EntityField("Larghezza calza (% guaina)", () => InnerPercent, v => InnerPercent = v),
-            new EntityField("Fili (ingressi = uscite)", () => WireCount, v => WireCount = (int)Math.Round(v))
+            new EntityField("Raggio curve", () => BendRadius, v => BendRadius = v)
         };
+        if (CanStrip)
+        {
+            fields.Add(new EntityField("Sguainatura inizio", () => StripStart, v => StripStart = v));
+            fields.Add(new EntityField("Sguainatura fine", () => StripEnd, v => StripEnd = v));
+            fields.Add(new EntityField("Larghezza calza (% fascio)", () => InnerPercent, v => InnerPercent = v));
+        }
+        if (IsTwisted)
+        {
+            fields.Add(new EntityField("Passo twistato (0 = auto)", () => TwistPitch, v => TwistPitch = v));
+        }
+        fields.Add(new EntityField("Fili (ingressi = uscite)", () => WireCount, v => WireCount = (int)Math.Round(v)));
+        if (IsAttached)
+        {
+            // il tracciato è quello della guaina base: si regola solo il tratto occupato
+            fields.Add(new EntityField("Inizio sul fascio base (mm)", () => ParentFrom, v =>
+            {
+                ParentFrom = Math.Max(0, v);
+                NotifyChanged();
+            }));
+            fields.Add(new EntityField("Fine sul fascio base (mm)", () => ParentTo, v =>
+            {
+                ParentTo = Math.Max(0, v);
+                NotifyChanged();
+            }));
+            return fields;
+        }
         for (int i = 0; i < _points.Count; i++)
         {
             int index = i;
@@ -939,22 +1473,40 @@ public class SheathEntity : EntityBase
 
     public override IReadOnlyList<TextField> GetTextFields()
     {
-        return new[]
+        List<TextField> fields = new()
         {
             new TextField("Tag", () => Tag, v => Tag = v),
             new TextField("Tipo", () => SheathType, v => SheathType = v,
-                new[] { "Guaina corrugata", "Guaina termorestringente", "Treccia", "Nastro", "Tubo" }),
-            new TextField("Colore", () => Color, v => Color = v, ColorPalette.Choices),
-            new TextField("Strato interno scoperto", () => InnerLayer, v => InnerLayer = v,
-                new[] { InnerNone, InnerCalza, InnerTube }),
-            new TextField("Colore strato interno", () => InnerColor, v => InnerColor = v, ColorPalette.Choices),
-            new TextField("Fili all'interno", () => Inside, v => Inside = v,
-                new[] { InsideVisible, InsideFaded, InsideHidden }),
-            new TextField("Codice articolo", () => PartNumber, v => PartNumber = v),
-            new TextField("Costruttore", () => Manufacturer, v => Manufacturer = v),
-            new TextField("Lunghezza reale (mm)", () => RealLength, v => RealLength = v),
-            new TextField("Fili contenuti", () => ContainedWires, _ => { })
+                new[] { "Guaina corrugata", "Guaina termorestringente", "Treccia", "Nastro", "Tubo", TwistedType, FerriteType })
         };
+        if (IsFerrite)
+        {
+            fields.Add(new TextField("Impedenza", () => Rating, v => Rating = v));
+        }
+        if (IsTwisted)
+        {
+            fields.Add(new TextField("Colori fili twistati (vuoto = come i fili collegati)", () => TwistColors, v => TwistColors = v));
+        }
+        else
+        {
+            fields.Add(new TextField("Colore", () => Color, v => Color = v, ColorPalette.Choices));
+        }
+        if (CanStrip)
+        {
+            fields.Add(new TextField("Strato interno scoperto", () => InnerLayer, v => InnerLayer = v,
+                new[] { InnerNone, InnerCalza, InnerTube }));
+            fields.Add(new TextField("Colore strato interno", () => InnerColor, v => InnerColor = v, ColorPalette.Choices));
+        }
+        if (!IsTwisted)
+        {
+            fields.Add(new TextField("Fili all'interno", () => Inside, v => Inside = v,
+                new[] { InsideVisible, InsideFaded, InsideHidden }));
+        }
+        fields.Add(new TextField("Codice articolo", () => PartNumber, v => PartNumber = v));
+        fields.Add(new TextField("Costruttore", () => Manufacturer, v => Manufacturer = v));
+        fields.Add(new TextField("Lunghezza reale (mm)", () => RealLength, v => RealLength = v));
+        fields.Add(new TextField("Fili contenuti", () => ContainedWires, _ => { }));
+        return fields;
     }
 
     public override IReadOnlyList<Point> GetDefinitionPoints()
@@ -964,12 +1516,12 @@ public class SheathEntity : EntityBase
 
     public override IReadOnlyList<Point> GetGripPoints()
     {
-        return _points.ToArray();
+        return IsAttached ? Array.Empty<Point>() : _points.ToArray();
     }
 
     public override void MoveGrip(int index, Point position)
     {
-        if (index >= 0 && index < _points.Count)
+        if (!IsAttached && index >= 0 && index < _points.Count)
         {
             _points[index] = position;
             NotifyChanged();
@@ -984,6 +1536,10 @@ public class SheathEntity : EntityBase
     /// <summary>Inserisce un vertice (nuova curva) sul tratto più vicino al punto indicato.</summary>
     public void InsertVertexNear(Point point)
     {
+        if (IsAttached)
+        {
+            return;
+        }
         int best = 0;
         double bestDistance = double.MaxValue;
         for (int i = 0; i + 1 < _points.Count; i++)
@@ -1005,7 +1561,7 @@ public class SheathEntity : EntityBase
     /// <summary>Rimuove il vertice più vicino al punto indicato (restano almeno due vertici).</summary>
     public bool RemoveVertexNear(Point point)
     {
-        if (_points.Count <= 2)
+        if (IsAttached || _points.Count <= 2)
         {
             return false;
         }
@@ -1027,6 +1583,11 @@ public class SheathEntity : EntityBase
 
     public override void Translate(Vector offset)
     {
+        if (IsAttached)
+        {
+            // si sposta insieme alla guaina base
+            return;
+        }
         for (int i = 0; i < _points.Count; i++)
         {
             _points[i] += offset;
@@ -1036,6 +1597,10 @@ public class SheathEntity : EntityBase
 
     public override void Transform(TransformKind kind, Point center)
     {
+        if (IsAttached)
+        {
+            return;
+        }
         for (int i = 0; i < _points.Count; i++)
         {
             _points[i] = Map(kind, center, _points[i]);
@@ -1061,6 +1626,15 @@ public class SheathEntity : EntityBase
         data["layer"] = _innerLayer;
         data["layerPct"] = _innerPercent.ToString("R", CultureInfo.InvariantCulture);
         data["layerColor"] = _innerColor;
+        data["twistColors"] = _twistColors;
+        data["twistPitch"] = _twistPitch.ToString("R", CultureInfo.InvariantCulture);
+        data["rating"] = _rating;
+        if (ParentId is Guid parentId)
+        {
+            data["parent"] = parentId.ToString();
+            data["pfrom"] = ParentFrom.ToString("R", CultureInfo.InvariantCulture);
+            data["pto"] = ParentTo.ToString("R", CultureInfo.InvariantCulture);
+        }
         if (_brokenLinks.Count > 0)
         {
             data["broken"] = string.Join(",", _brokenLinks.OrderBy(link => link).Select(link => link.ToString(CultureInfo.InvariantCulture)));
@@ -1087,6 +1661,12 @@ public class SheathEntity : EntityBase
         _innerPercent = Math.Clamp(GetDouble(data, "layerPct", 85), 20, 100);
         string innerColor = GetText(data, "layerColor");
         _innerColor = innerColor.Length == 0 ? "Grigio" : innerColor;
+        _twistColors = GetText(data, "twistColors");
+        _twistPitch = Math.Clamp(GetDouble(data, "twistPitch", 0), 0, 1000);
+        _rating = GetText(data, "rating");
+        ParentId = Guid.TryParse(GetText(data, "parent"), out Guid parentGuid) ? parentGuid : null;
+        ParentFrom = Math.Max(0, GetDouble(data, "pfrom", 0));
+        ParentTo = Math.Max(0, GetDouble(data, "pto", 0));
         _brokenLinks.Clear();
         foreach (string item in GetText(data, "broken").Split(',', StringSplitOptions.RemoveEmptyEntries))
         {
@@ -1115,6 +1695,45 @@ public static class SheathAnalyzer
     /// Per ciascun collegamento ingresso→uscita, indica se almeno uno dei due pin ha un filo collegato
     /// (i collegamenti senza fili a entrambe le estremità non vengono disegnati).
     /// </summary>
+    public static List<bool> UsedLinks(SheathEntity sheath, IEnumerable<WireEntity> wires, IEnumerable<SheathEntity> sheaths)
+    {
+        List<WireEntity> list = wires as List<WireEntity> ?? wires.ToList();
+        List<bool> used = UsedLinks(sheath, list);
+        List<SheathEntity> children = sheaths.Where(item => item.ParentId == sheath.Id && item.WireCount > 0).ToList();
+        if (children.Count == 0)
+        {
+            return used;
+        }
+        List<Point> childPins = new();
+        foreach (SheathEntity child in children)
+        {
+            for (int i = 0; i < child.PinCount; i++)
+            {
+                childPins.Add(child.GetPinPosition(i));
+            }
+        }
+        for (int k = 0; k < used.Count; k++)
+        {
+            if (!used[k])
+            {
+                continue;
+            }
+            Point entry = sheath.GetPinPosition(k);
+            Point exit = sheath.GetPinPosition(sheath.WireCount + k);
+            // il collegamento è sostituito dalla guaina annidata se un filo lo congiunge a un suo pin
+            bool carried = list.Any(wire =>
+                (WireEntity.Near(entry, wire.StartPoint, 0.01) && childPins.Any(pin => WireEntity.Near(pin, wire.EndPoint, 0.01)))
+                || (WireEntity.Near(entry, wire.EndPoint, 0.01) && childPins.Any(pin => WireEntity.Near(pin, wire.StartPoint, 0.01)))
+                || (WireEntity.Near(exit, wire.StartPoint, 0.01) && childPins.Any(pin => WireEntity.Near(pin, wire.EndPoint, 0.01)))
+                || (WireEntity.Near(exit, wire.EndPoint, 0.01) && childPins.Any(pin => WireEntity.Near(pin, wire.StartPoint, 0.01))));
+            if (carried)
+            {
+                used[k] = false;
+            }
+        }
+        return used;
+    }
+
     public static List<bool> UsedLinks(SheathEntity sheath, IEnumerable<WireEntity> wires)
     {
         List<WireEntity> list = wires as List<WireEntity> ?? wires.ToList();

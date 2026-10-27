@@ -58,11 +58,11 @@ public static class ErcChecker
             string sheathLabel = string.IsNullOrWhiteSpace(sheath.Tag) ? sheath.Name : sheath.Tag;
             if (string.IsNullOrWhiteSpace(sheath.Tag))
             {
-                issues.Add(new ErcIssue("Avviso", $"Guaina senza tag ({sheath.Name})."));
+                issues.Add(new ErcIssue("Avviso", $"Fascio senza tag ({sheath.Name})."));
             }
             if (SheathAnalyzer.WiresIn(sheath, wires).Count == 0)
             {
-                issues.Add(new ErcIssue("Avviso", $"Guaina {sheathLabel}: nessun filo al suo interno."));
+                issues.Add(new ErcIssue("Avviso", $"Fascio {sheathLabel}: nessun filo al suo interno."));
             }
             if (sheath.WireCount > 0)
             {
@@ -76,7 +76,7 @@ public static class ErcChecker
                 }
                 if (freePins.Count > 0)
                 {
-                    issues.Add(new ErcIssue("Info", $"Guaina {sheathLabel}: pin non collegati ({string.Join(", ", freePins)})."));
+                    issues.Add(new ErcIssue("Info", $"Fascio {sheathLabel}: pin non collegati ({string.Join(", ", freePins)})."));
                 }
             }
         }
@@ -214,7 +214,7 @@ public static class Reports
         StringBuilder builder = new();
         Dictionary<WireEntity, string> sheathOf = SheathTags(entities);
         Row(builder, "N. filo", "Colore", "Sezione (mm2)", "Da", "A", "Lunghezza (mm)", "Cavo", "Segnale",
-            "Capicorda da", "Capicorda a", "Potenziale", "Guaina", "Lunghezza totale taglio (mm)");
+            "Capicorda da", "Capicorda a", "Potenziale", "Fascio", "Lunghezza totale taglio (mm)");
         Dictionary<WireEntity, double> totalOf = TotalLengths(entities);
         foreach (WireEntity wire in entities.OfType<WireEntity>().OrderBy(item => item.Number, StringComparer.OrdinalIgnoreCase))
         {
@@ -324,7 +324,7 @@ public static class Reports
     {
         List<string[]> rows = new()
         {
-            new[] { "N. filo", "Colore", "Sez. mm²", "Da", "A", "Lung. mm", "Capicorda", "Guaina", "Taglio mm" }
+            new[] { "N. filo", "Colore", "Sez. mm²", "Da", "A", "Lung. mm", "Capicorda", "Fascio", "Taglio mm" }
         };
         Dictionary<WireEntity, string> sheathOf = SheathTags(entities);
         Dictionary<WireEntity, double> totalOf = TotalLengths(entities);
@@ -426,7 +426,7 @@ public static class Reports
         }
 
         builder.AppendLine();
-        Row(builder, "GUAINE");
+        Row(builder, "FASCI");
         Row(builder, "Tag", "Tipo", "Codice articolo", "Costruttore", "Diametro (mm)", "Lunghezza (mm)", "Fili contenuti",
             "Sguainatura inizio (mm)", "Sguainatura fine (mm)", "Strato interno");
         foreach (SheathEntity sheath in entities.OfType<SheathEntity>().OrderBy(item => item.Tag, StringComparer.OrdinalIgnoreCase))
