@@ -5,6 +5,8 @@ namespace WireCAD.Models;
 
 public class RectangleEntity : StrokedEntity
 {
+    private static readonly string[] LevelChoices = { "Sotto", "Sopra" };
+
     private Point _p1;
     private Point _p2;
     private double _cornerRadius;
@@ -87,7 +89,7 @@ public class RectangleEntity : StrokedEntity
         {
             DashField(),
             new TextField("Riempimento", () => string.IsNullOrEmpty(Fill) ? "Nessuno" : Fill, v => Fill = v, ColorPalette.Choices),
-            new TextField("Livello", () => Below ? "Sotto" : "Sopra", v => Below = !string.Equals(v.Trim(), "Sopra", StringComparison.OrdinalIgnoreCase), new[] { "Sotto", "Sopra" })
+            new TextField("Livello", () => Below ? "Sotto" : "Sopra", v => Below = !string.Equals(v.Trim(), "Sopra", StringComparison.OrdinalIgnoreCase), LevelChoices)
         };
     }
 
@@ -95,7 +97,7 @@ public class RectangleEntity : StrokedEntity
     {
         base.Export(data);
         data["fill"] = _fill;
-        data["radius"] = _cornerRadius.ToString("R", System.Globalization.CultureInfo.InvariantCulture);
+        data["radius"] = Num(_cornerRadius);
         data["below"] = _below ? "1" : "0";
     }
 

@@ -6,7 +6,9 @@ namespace WireCAD.Models;
 /// <summary>Spline che passa per i punti assegnati (curva di Catmull-Rom), aperta o chiusa.</summary>
 public class SplineEntity : StrokedEntity
 {
-    private List<Point> _points;
+    private static readonly string[] YesNoChoices = { "no", "sì" };
+
+    private readonly List<Point> _points;
     private bool _closed;
 
     public SplineEntity(IEnumerable<Point> points)
@@ -98,7 +100,7 @@ public class SplineEntity : StrokedEntity
             DashField(),
             new TextField("Chiusa", () => Closed ? "sì" : "no",
                 v => Closed = v.Trim().ToLowerInvariant() is "si" or "sì" or "s" or "yes" or "1",
-                new[] { "no", "sì" })
+                YesNoChoices)
         };
     }
 
@@ -134,7 +136,7 @@ public class SplineEntity : StrokedEntity
         int segments = _closed && _points.Count > 2 ? _points.Count : _points.Count - 1;
         for (int i = 0; i < segments; i++)
         {
-            double distance = WireEntity.DistanceToSegment(point, _points[i], _points[(i + 1) % _points.Count]);
+            double distance = GeometryMath.DistanceToSegment(point, _points[i], _points[(i + 1) % _points.Count]);
             if (distance < bestDistance)
             {
                 bestDistance = distance;

@@ -1,4 +1,3 @@
-using System.IO;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
@@ -27,54 +26,51 @@ public partial class MainWindow
             return;
         }
 
+        // prima lettura a fattore 1: serve a misurare il disegno e, se supera il foglio, a proporre un fattore adatto
+        CadImportResult? result = ReadCad(dialog.FileName, 1);
+        if (result == null)
+        {
+            return;
+        }
+        Rect bounds = BoundsOf(result.Entities);
+        if (bounds.IsEmpty)
+        {
+            ShowMessage("Il file non contiene entità importabili.", "Importazione", MessageBoxImage.Warning);
+            return;
+        }
+
+        double suggested = SuggestImportScale(bounds);
+        string size = $"Il disegno misura {FormatMm(Math.Round(bounds.Width, 1))} × {FormatMm(Math.Round(bounds.Height, 1))} mm con fattore 1; "
+            + $"il foglio è {FormatMm(_sheetWidth)} × {FormatMm(_sheetHeight)} mm.";
+        string advice = suggested < 1
+            ? $"Supera il foglio: con il fattore {FormatMm(suggested)} diventa {FormatMm(Math.Round(bounds.Width * suggested, 1))} × {FormatMm(Math.Round(bounds.Height * suggested, 1))} mm."
+            : "Entra nel foglio.";
         string? scaleText = Dialogs.Prompt(this, "Importa DXF / DWG",
-            "Fattore per convertire le unità del file in millimetri\n(1 = millimetri, 10 = centimetri, 1000 = metri, 25,4 = pollici):",
-            "1");
+            $"{size}\n{advice}\n\nFattore per convertire le unità del file in millimetri\n(1 = millimetri, 10 = centimetri, 1000 = metri, 25,4 = pollici; sotto 1 riduce il disegno):",
+            FormatMm(suggested));
         if (scaleText == null)
         {
             return;
         }
         if (!TryParseMm(scaleText, out double scale) || scale <= 0 || scale > 1e6)
         {
-            MessageBox.Show(this, "Fattore di conversione non valido.", "Importazione",
-                MessageBoxButton.OK, MessageBoxImage.Warning);
+            ShowMessage("Fattore di conversione non valido.", "Importazione", MessageBoxImage.Warning);
             return;
         }
 
-        CadImportResult result;
-        Mouse.OverrideCursor = Cursors.Wait;
-        try
+        if (Math.Abs(scale - 1) > 1e-12)
         {
-            result = CadImporter.Import(dialog.FileName, scale);
-        }
-        catch (Exception ex)
-        {
-            MessageBox.Show(this, $"Impossibile importare il file:\n{ex.Message}", "Importazione",
-                MessageBoxButton.OK, MessageBoxImage.Error);
-            return;
-        }
-        finally
-        {
-            Mouse.OverrideCursor = null;
-        }
-
-        if (result.Entities.Count == 0)
-        {
-            MessageBox.Show(this, "Il file non contiene entità importabili.", "Importazione",
-                MessageBoxButton.OK, MessageBoxImage.Warning);
-            return;
-        }
-
-        Rect bounds = Rect.Empty;
-        foreach (EntityBase entity in result.Entities)
-        {
-            bounds.Union(entity.BuildGeometry().Bounds);
-        }
-        if (bounds.IsEmpty)
-        {
-            MessageBox.Show(this, "Il disegno importato è vuoto.", "Importazione",
-                MessageBoxButton.OK, MessageBoxImage.Warning);
-            return;
+            result = ReadCad(dialog.FileName, scale);
+            if (result == null)
+            {
+                return;
+            }
+            bounds = BoundsOf(result.Entities);
+            if (bounds.IsEmpty)
+            {
+                ShowMessage("Il disegno importato è vuoto.", "Importazione", MessageBoxImage.Warning);
+                return;
+            }
         }
 
         SetTool(ToolType.Select);
@@ -85,6 +81,123 @@ public partial class MainWindow
         StatusHint.Text = result.Skipped > 0
             ? $"Importate {result.Entities.Count} entità ({result.Skipped} non supportate, ignorate). Clicca sul foglio per posizionare il disegno (angolo in alto a sinistra). Esc annulla."
             : $"Importate {result.Entities.Count} entità. Clicca sul foglio per posizionare il disegno (angolo in alto a sinistra). Esc annulla.";
+    }
+
+    /// <summary>Legge un DXF/DWG con il fattore dato, con il cursore di attesa; null (con messaggio) se non riesce.</summary>
+    private CadImportResult? ReadCad(string path, double? scale)
+    {
+        Mouse.OverrideCursor = Cursors.Wait;
+        try
+        {
+            // senza fattore si usano le unità dichiarate nel file
+            CadImportResult result = scale is double factor ? CadImporter.Import(path, factor) : CadImporter.ImportAutoUnits(path);
+            if (result.Entities.Count == 0)
+            {
+                ShowMessage("Il file non contiene entità importabili.", "Importazione", MessageBoxImage.Warning);
+                return null;
+            }
+            return result;
+        }
+        catch (Exception ex)
+        {
+            ShowMessage($"Impossibile importare il file:\n{ex.Message}", "Importazione", MessageBoxImage.Error);
+            return null;
+        }
+        finally
+        {
+            Mouse.OverrideCursor = null;
+        }
+    }
+
+    /// <summary>
+    /// Apre un DXF/DWG come documento: il foglio prende le dimensioni del disegno (con un margine), senza cornice né cartiglio,
+    /// e il disegno vi è centrato. Le unità sono quelle dichiarate nel file.
+    /// </summary>
+    private void OpenCadDocument(string path)
+    {
+        CadImportResult? result = ReadCad(path, null);
+        if (result == null)
+        {
+            return;
+        }
+        Rect bounds = BoundsOf(result.Entities);
+        if (bounds.IsEmpty)
+        {
+            ShowMessage("Il disegno è vuoto.", "Apertura", MessageBoxImage.Warning);
+            return;
+        }
+
+        const double margin = 10;
+        double width = Math.Clamp(bounds.Width + 2 * margin, MinSheetSize, MaxSheetSize);
+        double height = Math.Clamp(bounds.Height + 2 * margin, MinSheetSize, MaxSheetSize);
+        bool tooBig = bounds.Width + 2 * margin > MaxSheetSize || bounds.Height + 2 * margin > MaxSheetSize;
+        Vector offset = new((width - bounds.Width) / 2 - bounds.Left, (height - bounds.Height) / 2 - bounds.Top);
+
+        _restoring = true;
+        try
+        {
+            ClearDocument();
+            _sheetWidth = width;
+            _sheetHeight = height;
+            CkTitleBlock.IsChecked = false;
+            ApplySheetSize();
+            foreach (EntityBase entity in result.Entities)
+            {
+                entity.Translate(offset);
+                AddEntity(entity);
+            }
+            SyncAllWires();
+            RebuildNameCounters();
+        }
+        finally
+        {
+            _restoring = false;
+        }
+        _projectPath = null;
+        _openedCadName = System.IO.Path.GetFileName(path);
+        ResetHistory();
+        SetDirty(false);
+        ScheduleLabels();
+        FitView();
+        string units = Math.Abs(result.UnitFactor - 1) > 1e-9 ? $" Unità del file convertite in millimetri (×{FormatMm(result.UnitFactor)})." : string.Empty;
+        string skipped = result.Skipped > 0 ? $" {result.Skipped} elementi non supportati sono stati ignorati." : string.Empty;
+        string big = tooBig ? $" Il disegno supera il foglio massimo ({MaxSheetSize:0} mm): importalo con Importa > DXF / DWG scegliendo un fattore di riduzione." : string.Empty;
+        StatusHint.Text = $"Aperto \"{_openedCadName}\": {result.Entities.Count} oggetti, foglio {FormatMm(Math.Round(width, 1))} × {FormatMm(Math.Round(height, 1))} mm senza cornice.{units}{skipped}{big}";
+    }
+
+    private static Rect BoundsOf(IEnumerable<EntityBase> entities)
+    {
+        Rect bounds = Rect.Empty;
+        foreach (EntityBase entity in entities)
+        {
+            bounds.Union(entity.BuildGeometry().Bounds);
+        }
+        return bounds;
+    }
+
+    private static readonly double[] ScaleSteps = { 5, 2, 1 };
+
+    /// <summary>
+    /// Fattore di scala (1, 0,5, 0,2, 0,1, 0,05...) con cui il disegno entra nel 90% del foglio; 1 se ci sta già.
+    /// </summary>
+    private double SuggestImportScale(Rect bounds)
+    {
+        double fit = Math.Min(
+            _sheetWidth * 0.9 / Math.Max(bounds.Width, 1e-9),
+            _sheetHeight * 0.9 / Math.Max(bounds.Height, 1e-9));
+        if (fit >= 1)
+        {
+            return 1;
+        }
+        double decade = Math.Pow(10, Math.Floor(Math.Log10(fit)));
+        foreach (double step in ScaleSteps)
+        {
+            if (step * decade <= fit * (1 + 1e-9))
+            {
+                return Math.Round(step * decade, 9);
+            }
+        }
+        return Math.Round(decade, 9);
     }
 
     private ImageEntity? _pendingImage;
@@ -109,8 +222,7 @@ public partial class MainWindow
         }
         catch (Exception ex)
         {
-            MessageBox.Show(this, $"Impossibile aprire l'immagine:\n{ex.Message}", "Importazione",
-                MessageBoxButton.OK, MessageBoxImage.Error);
+            ShowMessage($"Impossibile aprire l'immagine:\n{ex.Message}", "Importazione", MessageBoxImage.Error);
             return;
         }
 
@@ -124,8 +236,7 @@ public partial class MainWindow
         }
         if (!TryParseMm(widthText, out double width) || width < 1 || width > 1e5)
         {
-            MessageBox.Show(this, "Larghezza non valida.", "Importazione",
-                MessageBoxButton.OK, MessageBoxImage.Warning);
+            ShowMessage("Larghezza non valida.", "Importazione", MessageBoxImage.Warning);
             return;
         }
         image.Width = width;

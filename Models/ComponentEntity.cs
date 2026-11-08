@@ -211,6 +211,8 @@ public class ComponentEntity : EntityBase
 
     public double TotalLength => _bodyLength + 2 * _drawnLead;
 
+    private static readonly string[] YesNoChoices = { "sì", "no" };
+
     private const string DiodeCathode = "K";
     private const string ForwardText = "Anodo → Catodo";
     private const string ReverseText = "Catodo → Anodo";
@@ -955,7 +957,7 @@ public class ComponentEntity : EntityBase
                 new[] { ForwardText, ReverseText }));
         }
         fields.Add(new TextField("Nomi pin (virgole)", GetPinNames, SetPinNames));
-        fields.Add(new TextField("Pin ponticellati", () => Bridged ? "sì" : "no", v => Bridged = IsYes(v), new[] { "sì", "no" }));
+        fields.Add(new TextField("Pin ponticellati", () => Bridged ? "sì" : "no", v => Bridged = IsYes(v), YesNoChoices));
         return fields;
     }
 
@@ -1158,32 +1160,32 @@ public class ComponentEntity : EntityBase
         {
             data["custom"] = "1";
             data["parts"] = JsonSerializer.Serialize(_parts);
-            data["pw"] = _partsWidth.ToString("R", System.Globalization.CultureInfo.InvariantCulture);
-            data["ph"] = _partsHeight.ToString("R", System.Globalization.CultureInfo.InvariantCulture);
+            data["pw"] = Num(_partsWidth);
+            data["ph"] = Num(_partsHeight);
             data["pm"] = string.Join(",", new[]
             {
                 _placement.M11, _placement.M12, _placement.M21, _placement.M22, _placement.OffsetX, _placement.OffsetY
-            }.Select(value => value.ToString("R", System.Globalization.CultureInfo.InvariantCulture)));
+            }.Select(value => Num(value)));
         }
-        data["cavity"] = _cavityDiameter.ToString("R", System.Globalization.CultureInfo.InvariantCulture);
+        data["cavity"] = Num(_cavityDiameter);
         data["key"] = _keyCorner.ToString(System.Globalization.CultureInfo.InvariantCulture);
-        data["rw"] = _realWidth.ToString("R", System.Globalization.CultureInfo.InvariantCulture);
-        data["rh"] = _realHeight.ToString("R", System.Globalization.CultureInfo.InvariantCulture);
-        data["scale"] = _drawScale.ToString("R", System.Globalization.CultureInfo.InvariantCulture);
+        data["rw"] = Num(_realWidth);
+        data["rh"] = Num(_realHeight);
+        data["scale"] = Num(_drawScale);
         if (_inline != null)
         {
             System.Globalization.CultureInfo invariant = System.Globalization.CultureInfo.InvariantCulture;
             data["inline"] = _inline;
-            data["ib"] = _bodyLength.ToString("R", invariant);
-            data["id"] = _bodyDiameter.ToString("R", invariant);
-            data["il"] = _leadLength.ToString("R", invariant);
-            data["idl"] = _drawnLead.ToString("R", invariant);
+            data["ib"] = Num(_bodyLength);
+            data["id"] = Num(_bodyDiameter);
+            data["il"] = Num(_leadLength);
+            data["idl"] = Num(_drawnLead);
             data["power"] = _power;
             data["tol"] = _tolerance;
             data["pm"] = string.Join(",", new[]
             {
                 _placement.M11, _placement.M12, _placement.M21, _placement.M22, _placement.OffsetX, _placement.OffsetY
-            }.Select(value => value.ToString("R", invariant)));
+            }.Select(value => Num(value)));
         }
         data["pins"] = JsonSerializer.Serialize(_pins);
     }

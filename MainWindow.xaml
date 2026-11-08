@@ -30,7 +30,7 @@
                     <Viewbox Width="18" Height="18"><Canvas Width="24" Height="24"><Path Style="{StaticResource Ico}" Data="M6,3 H14 L19,8 V21 H6 Z M14,3 V8 H19"/></Canvas></Viewbox>
                 </MenuItem.Header>
                 <MenuItem Header="_Nuovo" InputGestureText="Ctrl+N" Click="MenuNew_Click"/>
-                <MenuItem Header="_Apri progetto..." InputGestureText="Ctrl+O" Click="MenuOpen_Click"/>
+                <MenuItem Header="_Apri (progetto, DXF, DWG)..." InputGestureText="Ctrl+O" Click="MenuOpen_Click"/>
                 <MenuItem Header="_Salva" InputGestureText="Ctrl+S" Click="MenuSave_Click"/>
                 <MenuItem Header="Salva con _nome..." InputGestureText="Ctrl+Maiusc+S" Click="MenuSaveAs_Click"/>
                 <Separator/>
@@ -179,8 +179,7 @@
                     <Path x:Name="GridMajorPath" Stroke="#94A3B8" StrokeThickness="0.2"/>
                     <Path x:Name="OriginMarker" Stroke="#DC2626" StrokeThickness="0.4"/>
 
-                    <Canvas x:Name="ChromeCanvas" Canvas.Left="0" Canvas.Top="0" Width="297" Height="210"
-                            Visibility="{Binding IsChecked, ElementName=CkTitleBlock, Converter={StaticResource BoolToVis}}">
+                    <Canvas x:Name="ChromeCanvas" Canvas.Left="0" Canvas.Top="0" Width="297" Height="210">
                         <Border x:Name="FrameBorder" Canvas.Left="10" Canvas.Top="10" Width="277" Height="190"
                                 BorderBrush="Black" BorderThickness="0.5"/>
                         <ctl:TitleBlockControl x:Name="TitleBlockCtl" Canvas.Left="107" Canvas.Top="168"/>
@@ -339,19 +338,20 @@
                         <CheckBox x:Name="CkObjSnap" Content="Snap a cavità e vertici" IsChecked="True" Margin="0,0,0,6"/>
                         <CheckBox x:Name="CkOrtho" Content="Fili ortogonali (spegni per angoli liberi)" IsChecked="False" Margin="0,0,0,16"/>
                         <TextBlock Text="Cartiglio" FontSize="14" FontWeight="Bold"/>
-                        <CheckBox x:Name="CkTitleBlock" Content="Mostra cartiglio e cornice" IsChecked="True" Margin="0,6,0,10"/>
+                        <CheckBox x:Name="CkTitleBlock" Content="Mostra cartiglio e cornice" IsChecked="True" Margin="0,6,0,10"
+                                  Checked="TitleBlockOption_Changed" Unchecked="TitleBlockOption_Changed"/>
 
                         <TextBlock Text="Titolo" FontSize="11" Foreground="#4B5563"/>
-                        <TextBox Text="{Binding DrawingTitle, ElementName=TitleBlockCtl, UpdateSourceTrigger=PropertyChanged}" Margin="0,2,0,8"/>
+                        <TextBox LostKeyboardFocus="TitleBlockBox_LostFocus" Text="{Binding DrawingTitle, ElementName=TitleBlockCtl, UpdateSourceTrigger=PropertyChanged}" Margin="0,2,0,8"/>
 
                         <TextBlock Text="Azienda" FontSize="11" Foreground="#4B5563"/>
-                        <TextBox Text="{Binding CompanyName, ElementName=TitleBlockCtl, UpdateSourceTrigger=PropertyChanged}" Margin="0,2,0,8"/>
+                        <TextBox LostKeyboardFocus="TitleBlockBox_LostFocus" Text="{Binding CompanyName, ElementName=TitleBlockCtl, UpdateSourceTrigger=PropertyChanged}" Margin="0,2,0,8"/>
 
                         <TextBlock Text="Autore" FontSize="11" Foreground="#4B5563"/>
-                        <TextBox Text="{Binding AuthorName, ElementName=TitleBlockCtl, UpdateSourceTrigger=PropertyChanged}" Margin="0,2,0,8"/>
+                        <TextBox LostKeyboardFocus="TitleBlockBox_LostFocus" Text="{Binding AuthorName, ElementName=TitleBlockCtl, UpdateSourceTrigger=PropertyChanged}" Margin="0,2,0,8"/>
 
                         <TextBlock Text="N. disegno" FontSize="11" Foreground="#4B5563"/>
-                        <TextBox Text="{Binding DrawingNumber, ElementName=TitleBlockCtl, UpdateSourceTrigger=PropertyChanged}" Margin="0,2,0,8"/>
+                        <TextBox LostKeyboardFocus="TitleBlockBox_LostFocus" Text="{Binding DrawingNumber, ElementName=TitleBlockCtl, UpdateSourceTrigger=PropertyChanged}" Margin="0,2,0,8"/>
 
                         <Grid Margin="0,0,0,8">
                             <Grid.ColumnDefinitions>
@@ -361,20 +361,20 @@
                             </Grid.ColumnDefinitions>
                             <StackPanel Grid.Column="0" Margin="0,0,4,0">
                                 <TextBlock Text="Scala" FontSize="11" Foreground="#4B5563"/>
-                                <TextBox Text="{Binding ScaleValue, ElementName=TitleBlockCtl, UpdateSourceTrigger=PropertyChanged}"/>
+                                <TextBox LostKeyboardFocus="TitleBlockBox_LostFocus" Text="{Binding ScaleValue, ElementName=TitleBlockCtl, UpdateSourceTrigger=PropertyChanged}"/>
                             </StackPanel>
                             <StackPanel Grid.Column="1" Margin="0,0,4,0">
                                 <TextBlock Text="Data" FontSize="11" Foreground="#4B5563"/>
-                                <TextBox Text="{Binding DateValue, ElementName=TitleBlockCtl, UpdateSourceTrigger=PropertyChanged}"/>
+                                <TextBox LostKeyboardFocus="TitleBlockBox_LostFocus" Text="{Binding DateValue, ElementName=TitleBlockCtl, UpdateSourceTrigger=PropertyChanged}"/>
                             </StackPanel>
                             <StackPanel Grid.Column="2">
                                 <TextBlock Text="Revisione" FontSize="11" Foreground="#4B5563"/>
-                                <TextBox Text="{Binding RevisionValue, ElementName=TitleBlockCtl, UpdateSourceTrigger=PropertyChanged}"/>
+                                <TextBox LostKeyboardFocus="TitleBlockBox_LostFocus" Text="{Binding RevisionValue, ElementName=TitleBlockCtl, UpdateSourceTrigger=PropertyChanged}"/>
                             </StackPanel>
                         </Grid>
 
                         <TextBlock Text="Foglio" FontSize="11" Foreground="#4B5563"/>
-                        <TextBox Text="{Binding SheetValue, ElementName=TitleBlockCtl, UpdateSourceTrigger=PropertyChanged}" Margin="0,2,0,16"/>
+                        <TextBox LostKeyboardFocus="TitleBlockBox_LostFocus" Text="{Binding SheetValue, ElementName=TitleBlockCtl, UpdateSourceTrigger=PropertyChanged}" Margin="0,2,0,16"/>
 
                         <TextBlock Text="Foglio (mm)" FontSize="14" FontWeight="Bold"/>
                         <ComboBox x:Name="SheetPresetBox" DisplayMemberPath="Label" Margin="0,6,0,6"

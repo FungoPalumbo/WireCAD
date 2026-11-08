@@ -5,3 +5,4 @@ obj/
 file test/
 *.pdf
 release/
+backup/

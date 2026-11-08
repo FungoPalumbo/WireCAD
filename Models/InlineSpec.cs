@@ -42,6 +42,8 @@ public static class ResistorCode
         "#16A34A", "#2563EB", "#7C3AED", "#6B7280", "#F9FAFB"
     };
 
+    private static readonly char[] MultiplierLetters = { 'R', 'r', 'k', 'K', 'M', 'G' };
+
     private const string Gold = "#D4A017";
     private const string Silver = "#C0C0C0";
 
@@ -63,7 +65,7 @@ public static class ResistorCode
             return false;
         }
         double multiplier = 1;
-        int position = value.IndexOfAny(new[] { 'R', 'r', 'k', 'K', 'M', 'G' });
+        int position = value.IndexOfAny(MultiplierLetters);
         if (position >= 0)
         {
             switch (char.ToUpperInvariant(value[position]))

@@ -2,7 +2,6 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
-using System.Windows.Threading;
 using WireCAD.Controls;
 using WireCAD.Models;
 
@@ -17,9 +16,8 @@ public partial class MainWindow
         Fillet
     }
 
-    private readonly DispatcherTimer _arcHoldTimer = new() { Interval = TimeSpan.FromMilliseconds(450) };
+    private readonly HoldMenu _arcHold;
     private ArcMode _arcMode = ArcMode.StartEndMiddle;
-    private bool _arcMenuOpened;
     private double _filletRadius = 5;
     private LineEntity? _filletFirst;
     private Point _filletFirstClick;
@@ -29,40 +27,22 @@ public partial class MainWindow
     // ---------------------------------------------------------------- icona dell'arco
 
     // Pressione prolungata sull'icona: il menu si apre mentre il tasto è ancora premuto. Si apre anche con il tasto destro.
-    private void BtnArc_PreviewMouseDown(object sender, MouseButtonEventArgs e)
-    {
-        _arcMenuOpened = false;
-        _arcHoldTimer.Start();
-    }
+    private void BtnArc_PreviewMouseDown(object sender, MouseButtonEventArgs e) => _arcHold.Press();
 
-    private void BtnArc_PreviewMouseUp(object sender, MouseButtonEventArgs e)
-    {
-        _arcHoldTimer.Stop();
-    }
+    private void BtnArc_PreviewMouseUp(object sender, MouseButtonEventArgs e) => _arcHold.Release();
 
-    private void BtnArc_MouseLeave(object sender, MouseEventArgs e)
-    {
-        _arcHoldTimer.Stop();
-    }
+    private void BtnArc_MouseLeave(object sender, MouseEventArgs e) => _arcHold.Release();
 
     private void BtnArc_RightClick(object sender, MouseButtonEventArgs e)
     {
         e.Handled = true;
-        ShowArcMenu();
-    }
-
-    private void ArcHoldTimer_Tick(object? sender, EventArgs e)
-    {
-        _arcHoldTimer.Stop();
-        _arcMenuOpened = true;
-        ShowArcMenu();
+        _arcHold.ShowNow();
     }
 
     private void BtnArc_Click(object sender, RoutedEventArgs e)
     {
-        if (_arcMenuOpened)
+        if (_arcHold.ConsumeOpened())
         {
-            _arcMenuOpened = false;
             SetTool(_tool);
             return;
         }

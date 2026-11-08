@@ -148,9 +148,10 @@ public abstract class EntityBase : INotifyPropertyChanged
 
     public abstract void SetDefinitionPoint(int index, Point position);
 
+    /// <summary>Punti ai quali altri oggetti possono agganciarsi (estremi, centri, punti medi...); di norma i punti di definizione.</summary>
     public virtual IReadOnlyList<Point> GetSnapPoints()
     {
-        return GetGripPoints();
+        return GetDefinitionPoints();
     }
 
     public abstract void Translate(Vector offset);
@@ -248,6 +249,12 @@ public abstract class EntityBase : INotifyPropertyChanged
         }
     }
 
+    /// <summary>Numero nel formato dei file (round-trip, indipendente dalla lingua del sistema).</summary>
+    protected static string Num(double value)
+    {
+        return value.ToString("R", CultureInfo.InvariantCulture);
+    }
+
     protected static string GetText(Dictionary<string, string> data, string key)
     {
         return data.TryGetValue(key, out string? value) ? value : string.Empty;
@@ -286,8 +293,14 @@ public abstract class EntityBase : INotifyPropertyChanged
         NotifyChanged();
     }
 
+    /// <summary>Chiamato a ogni modifica, prima di notificarla: le classi che memorizzano valori derivati li azzerano qui.</summary>
+    protected virtual void OnInvalidated()
+    {
+    }
+
     protected void NotifyChanged()
     {
+        OnInvalidated();
         GeometryChanged?.Invoke(this, EventArgs.Empty);
         RaisePropertyChanged(nameof(Summary));
     }

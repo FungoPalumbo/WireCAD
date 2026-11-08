@@ -32,7 +32,7 @@ public partial class MainWindow
             IReadOnlyList<Point> points = wire.Points;
             for (int i = 0; i + 1 < points.Count; i++)
             {
-                double distance = WireEntity.DistanceToSegment(world, points[i], points[i + 1]);
+                double distance = GeometryMath.DistanceToSegment(world, points[i], points[i + 1]);
                 if (distance <= best)
                 {
                     best = distance;
@@ -51,7 +51,7 @@ public partial class MainWindow
                 List<Point> line = sheath.LinkPolyline(link);
                 for (int i = 0; i + 1 < line.Count; i++)
                 {
-                    double distance = WireEntity.DistanceToSegment(world, line[i], line[i + 1]);
+                    double distance = GeometryMath.DistanceToSegment(world, line[i], line[i + 1]);
                     if (distance <= best)
                     {
                         best = distance;
@@ -209,11 +209,11 @@ public partial class MainWindow
                 for (int pin = 0; pin < component.PinCount; pin++)
                 {
                     Point position = component.GetPinPosition(pin);
-                    if (WireEntity.Near(position, wire.StartPoint, 0.01))
+                    if (GeometryMath.AtPin(position, wire.StartPoint))
                     {
                         extra += component.LeadLength;
                     }
-                    if (WireEntity.Near(position, wire.EndPoint, 0.01))
+                    if (GeometryMath.AtPin(position, wire.EndPoint))
                     {
                         extra += component.LeadLength;
                     }

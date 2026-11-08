@@ -2,7 +2,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
-using System.Windows.Threading;
+using WireCAD.Controls;
 using WireCAD.Models;
 
 namespace WireCAD;
@@ -10,44 +10,25 @@ namespace WireCAD;
 // Parte della finestra dedicata alla scelta dell'aspetto dei nuovi fili (pressione prolungata sull'icona Filo).
 public partial class MainWindow
 {
-    private readonly DispatcherTimer _wireHoldTimer = new() { Interval = TimeSpan.FromMilliseconds(450) };
-    private bool _wireMenuOpened;
+    private readonly HoldMenu _wireHold;
     private bool _wireRealistic = true;
 
-    private void BtnWire_PreviewMouseDown(object sender, MouseButtonEventArgs e)
-    {
-        _wireMenuOpened = false;
-        _wireHoldTimer.Start();
-    }
+    private void BtnWire_PreviewMouseDown(object sender, MouseButtonEventArgs e) => _wireHold.Press();
 
-    private void BtnWire_PreviewMouseUp(object sender, MouseButtonEventArgs e)
-    {
-        _wireHoldTimer.Stop();
-    }
+    private void BtnWire_PreviewMouseUp(object sender, MouseButtonEventArgs e) => _wireHold.Release();
 
-    private void BtnWire_MouseLeave(object sender, MouseEventArgs e)
-    {
-        _wireHoldTimer.Stop();
-    }
+    private void BtnWire_MouseLeave(object sender, MouseEventArgs e) => _wireHold.Release();
 
     private void BtnWire_RightClick(object sender, MouseButtonEventArgs e)
     {
         e.Handled = true;
-        ShowWireMenu();
-    }
-
-    private void WireHoldTimer_Tick(object? sender, EventArgs e)
-    {
-        _wireHoldTimer.Stop();
-        _wireMenuOpened = true;
-        ShowWireMenu();
+        _wireHold.ShowNow();
     }
 
     private void BtnWire_Click(object sender, RoutedEventArgs e)
     {
-        if (_wireMenuOpened)
+        if (_wireHold.ConsumeOpened())
         {
-            _wireMenuOpened = false;
             SetTool(_tool);
             return;
         }

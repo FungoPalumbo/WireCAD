@@ -47,8 +47,7 @@ public partial class MainWindow
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            MessageBox.Show(this, $"Impossibile salvare il cartiglio:\n{ex.Message}", "Esporta cartiglio",
-                MessageBoxButton.OK, MessageBoxImage.Error);
+            ShowMessage($"Impossibile salvare il cartiglio:\n{ex.Message}", "Esporta cartiglio", MessageBoxImage.Error);
             return;
         }
         StatusHint.Text = $"Cartiglio esportato in \"{System.IO.Path.GetFileName(dialog.FileName)}\".";
@@ -74,14 +73,12 @@ public partial class MainWindow
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
         {
-            MessageBox.Show(this, $"Impossibile leggere il cartiglio:\n{ex.Message}", "Importa cartiglio",
-                MessageBoxButton.OK, MessageBoxImage.Error);
+            ShowMessage($"Impossibile leggere il cartiglio:\n{ex.Message}", "Importa cartiglio", MessageBoxImage.Error);
             return;
         }
         if (fields == null || fields.Count == 0)
         {
-            MessageBox.Show(this, "Il file non contiene campi del cartiglio.", "Importa cartiglio",
-                MessageBoxButton.OK, MessageBoxImage.Warning);
+            ShowMessage("Il file non contiene campi del cartiglio.", "Importa cartiglio", MessageBoxImage.Warning);
             return;
         }
 
@@ -106,8 +103,7 @@ public partial class MainWindow
 
         if (applied == 0)
         {
-            MessageBox.Show(this, "Il file non contiene campi del cartiglio riconosciuti.", "Importa cartiglio",
-                MessageBoxButton.OK, MessageBoxImage.Warning);
+            ShowMessage("Il file non contiene campi del cartiglio riconosciuti.", "Importa cartiglio", MessageBoxImage.Warning);
             return;
         }
         CommitChange();

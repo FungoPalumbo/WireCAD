@@ -5,7 +5,8 @@ using System.Windows.Media;
 namespace WireCAD.Models;
 
 /// <summary>Polilinea da esportare (coordinate del foglio in mm, Y verso il basso).</summary>
-public sealed record ExportPolyline(IReadOnlyList<Point> Points, bool Closed, bool Filled, string Color, double Width, string Layer, string? FillColor = null, double FillOpacity = 1);
+/// <remarks>Le polilinee <see cref="Decorative"/> (riflessi, smussature semitrasparenti) sono omesse dai formati CAD.</remarks>
+public sealed record ExportPolyline(IReadOnlyList<Point> Points, bool Closed, bool Filled, string Color, double Width, string Layer, string? FillColor = null, double FillOpacity = 1, bool Decorative = false);
 
 /// <summary>Filo realistico: fascia di spessore Diameter lungo il tracciato, con bordo e riempimento (ed eventuali strisce).</summary>
 public sealed record ExportBand(IReadOnlyList<Point> Points, double Diameter, string OutlineColor, string FillColor, string? StripeColor, string Layer);
@@ -58,11 +59,8 @@ public static class SceneBuilder
     public const string BandDefaultFill = "#F3F4F6";
     public const double BandBorder = 0.25;
 
-    private static Vector Unit(Vector vector)
-    {
-        double length = vector.Length;
-        return length < 1e-12 ? new Vector(0, 0) : new Vector(vector.X / length, vector.Y / length);
-    }
+    /// <summary>Lunghezza (mm) di ciascun tratto di colore nei fili bicolore; stessa regola per fili e twistati.</summary>
+    public const double StripeLength = 2;
 
     /// <summary>Polilinea parallela a quella data, spostata di <paramref name="distance"/> (positiva a sinistra rispetto alla direzione), con giunti a spigolo.</summary>
     public static List<Point> OffsetPolyline(IReadOnlyList<Point> points, double distance)
@@ -78,8 +76,8 @@ public static class SceneBuilder
         List<Point> result = new();
         for (int i = 0; i < unique.Count; i++)
         {
-            Vector previous = i > 0 ? Unit(unique[i] - unique[i - 1]) : new Vector(0, 0);
-            Vector next = i < unique.Count - 1 ? Unit(unique[i + 1] - unique[i]) : new Vector(0, 0);
+            Vector previous = i > 0 ? GeometryMath.Unit(unique[i] - unique[i - 1]) : new Vector(0, 0);
+            Vector next = i < unique.Count - 1 ? GeometryMath.Unit(unique[i + 1] - unique[i]) : new Vector(0, 0);
             Vector n1 = new(-previous.Y, previous.X);
             Vector n2 = new(-next.Y, next.X);
             Vector offset;
@@ -124,6 +122,17 @@ public static class SceneBuilder
     public static short AciColor(string hex)
     {
         return AciColors.TryGetValue(hex, out short index) ? index : (short)7;
+    }
+
+    /// <summary>Spessore (mm) al di sotto del quale il contorno di una forma riempita è solo un filetto, non un tratto vero.</summary>
+    public const double HairlineWidth = 0.011;
+
+    /// <summary>Colore ottenuto sovrapponendo il colore indicato al bianco con la data opacità (per i formati senza trasparenza).</summary>
+    public static string BlendWithWhite(string hex, double opacity)
+    {
+        (double r, double g, double b) = Rgb(hex);
+        double Mix(double channel) => Math.Clamp(channel * opacity + (1 - opacity), 0, 1);
+        return $"#{(int)Math.Round(Mix(r) * 255):X2}{(int)Math.Round(Mix(g) * 255):X2}{(int)Math.Round(Mix(b) * 255):X2}";
     }
 
     public static (double R, double G, double B) Rgb(string hex)
@@ -220,7 +229,8 @@ public static class SceneBuilder
                 {
                     foreach (SheathEntity.FerriteLayer part in ferrite.FerriteLayers())
                     {
-                        scene.Polylines.Add(new ExportPolyline(part.Polygon, true, true, part.Fill, 0.01, layer, part.Fill, part.Opacity));
+                        scene.Polylines.Add(new ExportPolyline(
+                            part.Polygon, true, true, part.Fill, 0.01, layer, part.Fill, part.Opacity, part.Opacity < 0.999));
                     }
                 }
                 if (entity is SheathEntity { IsTwisted: true } twisted)
@@ -482,7 +492,7 @@ public static class SceneBuilder
     /// <summary>Suddivide il tracciato in tratti di 2 mm di colore alternato (fili bicolore).</summary>
     private static void AddStriped(ExportScene scene, List<Point> points, string firstColor, string secondColor, double width, string layer)
     {
-        const double stripe = 2;
+        const double stripe = StripeLength;
         List<Point> current = new() { points[0] };
         bool first = false; // a schermo il primo tratto è del secondo colore (sovrapposto tratteggiato)
         double remaining = stripe;

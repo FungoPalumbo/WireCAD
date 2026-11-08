@@ -75,11 +75,12 @@ public partial class MainWindow
             foreach (EntityBase entity in _entities)
             {
                 if (ReferenceEquals(entity, exclude)
-                    || !(entity is WireEntity || entity is LineEntity || entity is RectangleEntity || entity is ArcEntity || entity is SheathEntity || entity is SplineEntity || entity is CircleEntity))
+                    || !(entity is WireEntity || entity is LineEntity || entity is RectangleEntity || entity is ArcEntity || entity is SheathEntity
+                        || entity is SplineEntity || entity is CircleEntity || entity is DimensionEntity || entity is ImageEntity))
                 {
                     continue;
                 }
-                foreach (Point vertex in entity.GetDefinitionPoints())
+                foreach (Point vertex in entity.GetSnapPoints())
                 {
                     double distance = (vertex - world).Length;
                     if (distance <= best)
@@ -110,7 +111,7 @@ public partial class MainWindow
                     {
                         Point a = points[k];
                         Point b = points[k + 1];
-                        double distance = WireEntity.DistanceToSegment(world, a, b);
+                        double distance = GeometryMath.DistanceToSegment(world, a, b);
                         if (distance > best)
                         {
                             continue;
@@ -405,9 +406,10 @@ public partial class MainWindow
 
     private void SyncWiresTo(EntityBase owner)
     {
-        foreach (WireEntity wire in _entities.OfType<WireEntity>().ToList())
+        // ciclo per indice: a ogni passo di trascinamento si evita di copiare l'elenco delle entità
+        for (int i = 0; i < _entities.Count; i++)
         {
-            if (wire.StartComp == owner.Id || wire.EndComp == owner.Id)
+            if (_entities[i] is WireEntity wire && (wire.StartComp == owner.Id || wire.EndComp == owner.Id))
             {
                 wire.SyncEndpoints(ResolvePin);
             }
@@ -416,9 +418,12 @@ public partial class MainWindow
 
     private void SyncAllWires()
     {
-        foreach (WireEntity wire in _entities.OfType<WireEntity>().ToList())
+        for (int i = 0; i < _entities.Count; i++)
         {
-            wire.SyncEndpoints(ResolvePin);
+            if (_entities[i] is WireEntity wire)
+            {
+                wire.SyncEndpoints(ResolvePin);
+            }
         }
     }
 
@@ -457,7 +462,7 @@ public partial class MainWindow
             _overlays[entity] = overlay;
             DrawCanvas.Children.Add(overlay);
         }
-        double dash = 2 / thickness;
+        double dash = SceneBuilder.StripeLength / thickness;
         overlay.Data = main.Data;
         overlay.Stroke = CachedBrush(secondColor);
         overlay.StrokeThickness = thickness;

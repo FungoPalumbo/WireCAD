@@ -6,7 +6,8 @@ using Cad = ACadSharp.Entities;
 
 namespace WireCAD.Models;
 
-public sealed record CadImportResult(List<EntityBase> Entities, int Skipped);
+/// <param name="UnitFactor">Millimetri per unità del file con cui sono stati convertiti i dati.</param>
+public sealed record CadImportResult(List<EntityBase> Entities, int Skipped, double UnitFactor = 1);
 
 /// <summary>
 /// Importazione di disegni DXF e DWG: le entità CAD sono convertite nelle primitive di WireCAD
@@ -48,17 +49,61 @@ public static class CadImporter
         }
     }
 
-    public static CadImportResult Import(string path, double unitScale)
+    private static CadDocument ReadDocument(string path)
     {
-        CadDocument document = path.EndsWith(".dwg", StringComparison.OrdinalIgnoreCase)
+        return path.EndsWith(".dwg", StringComparison.OrdinalIgnoreCase)
             ? DwgReader.Read(path)
             : DxfReader.Read(path);
+    }
+
+    private static CadImportResult ConvertDocument(CadDocument document, double unitScale)
+    {
         Context context = new(unitScale);
         foreach (Cad.Entity entity in document.Entities)
         {
             Convert(entity, context, 0);
         }
-        return new CadImportResult(context.Entities, context.Skipped);
+        return new CadImportResult(context.Entities, context.Skipped, unitScale);
+    }
+
+    public static CadImportResult Import(string path, double unitScale)
+    {
+        return ConvertDocument(ReadDocument(path), unitScale);
+    }
+
+    /// <summary>Come <see cref="Import"/>, ma ricava il fattore di conversione in millimetri dalle unità dichiarate nel file (1 se non indicate).</summary>
+    public static CadImportResult ImportAutoUnits(string path)
+    {
+        CadDocument document = ReadDocument(path);
+        return ConvertDocument(document, MillimetersPerUnit(document.Header.InsUnits));
+    }
+
+    /// <summary>Millimetri in una unità di disegno CAD; le unità non indicate o non lineari valgono come millimetri.</summary>
+    public static double MillimetersPerUnit(ACadSharp.Types.Units.UnitsType units)
+    {
+        return units switch
+        {
+            ACadSharp.Types.Units.UnitsType.Inches => 25.4,
+            ACadSharp.Types.Units.UnitsType.Feet => 304.8,
+            ACadSharp.Types.Units.UnitsType.Yards => 914.4,
+            ACadSharp.Types.Units.UnitsType.Miles => 1609344,
+            ACadSharp.Types.Units.UnitsType.Centimeters => 10,
+            ACadSharp.Types.Units.UnitsType.Decimeters => 100,
+            ACadSharp.Types.Units.UnitsType.Meters => 1000,
+            ACadSharp.Types.Units.UnitsType.Decameters => 10000,
+            ACadSharp.Types.Units.UnitsType.Hectometers => 100000,
+            ACadSharp.Types.Units.UnitsType.Kilometers => 1000000,
+            ACadSharp.Types.Units.UnitsType.Microinches => 25.4e-6,
+            ACadSharp.Types.Units.UnitsType.Mils => 0.0254,
+            ACadSharp.Types.Units.UnitsType.Microns => 0.001,
+            ACadSharp.Types.Units.UnitsType.Nanometers => 1e-6,
+            ACadSharp.Types.Units.UnitsType.Angstroms => 1e-7,
+            ACadSharp.Types.Units.UnitsType.USSurveyFeet => 304.8006096,
+            ACadSharp.Types.Units.UnitsType.USSurveyInches => 25.4000508,
+            ACadSharp.Types.Units.UnitsType.USSurveyYards => 914.4018288,
+            ACadSharp.Types.Units.UnitsType.USSurveyMiles => 1609347.2187,
+            _ => 1
+        };
     }
 
     private static void Convert(Cad.Entity entity, Context context, int depth)

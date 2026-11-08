@@ -102,7 +102,7 @@ public partial class MainWindow
     }
 
     /// <summary>Ogni filo dell'intreccio prende i colori del filo collegato al suo pin (ingresso o uscita); bianco se non c'è.</summary>
-    private void UpdateTwistColors(SheathEntity sheath, List<WireEntity> wires)
+    private static void UpdateTwistColors(SheathEntity sheath, List<WireEntity> wires)
     {
         if (!sheath.IsTwisted)
         {
@@ -123,8 +123,8 @@ public partial class MainWindow
                 Point exit = sheath.GetPinPosition(sheath.WireCount + k);
                 foreach (WireEntity wire in wires)
                 {
-                    bool attached = WireEntity.Near(entry, wire.StartPoint, 0.01) || WireEntity.Near(entry, wire.EndPoint, 0.01)
-                        || WireEntity.Near(exit, wire.StartPoint, 0.01) || WireEntity.Near(exit, wire.EndPoint, 0.01);
+                    bool attached = GeometryMath.AtPin(entry, wire.StartPoint) || GeometryMath.AtPin(entry, wire.EndPoint)
+                        || GeometryMath.AtPin(exit, wire.StartPoint) || GeometryMath.AtPin(exit, wire.EndPoint);
                     if (!attached)
                     {
                         continue;

@@ -138,7 +138,7 @@ public class TextEntity : EntityBase
     public override void Export(Dictionary<string, string> data)
     {
         data["text"] = _text;
-        data["height"] = _textHeight.ToString("R", CultureInfo.InvariantCulture);
+        data["height"] = Num(_textHeight);
     }
 
     public override void Import(Dictionary<string, string> data)

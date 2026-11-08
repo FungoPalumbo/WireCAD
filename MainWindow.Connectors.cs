@@ -1,6 +1,5 @@
 using System.IO;
 using System.Windows;
-using System.Windows.Controls;
 using WireCAD.Controls;
 using WireCAD.Models;
 
@@ -32,16 +31,12 @@ public partial class MainWindow
         List<EntityBase> parts = selected.Where(ComponentTemplate.IsConnectorPart).ToList();
         if (parts.Count == 0)
         {
-            MessageBox.Show(this,
-                "Seleziona il disegno del connettore (linee, archi, cerchi, spline, rettangoli, testi) e i suoi pin numerati.",
-                "Salva come connettore", MessageBoxButton.OK, MessageBoxImage.Information);
+            ShowMessage("Seleziona il disegno del connettore (linee, archi, cerchi, spline, rettangoli, testi) e i suoi pin numerati.", "Salva come connettore", MessageBoxImage.Information);
             return;
         }
         if (!parts.OfType<PinEntity>().Any())
         {
-            MessageBoxResult answer = MessageBox.Show(this,
-                "La selezione non contiene nessun Pin: i fili non potranno agganciarsi al connettore.\nSalvare comunque?",
-                "Salva come connettore", MessageBoxButton.YesNo, MessageBoxImage.Question);
+            MessageBoxResult answer = MessageBox.Show(this, "La selezione non contiene nessun Pin: i fili non potranno agganciarsi al connettore.\nSalvare comunque?", "Salva come connettore", MessageBoxButton.YesNo, MessageBoxImage.Question);
             if (answer != MessageBoxResult.Yes)
             {
                 return;
@@ -74,8 +69,7 @@ public partial class MainWindow
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            MessageBox.Show(this, $"Impossibile salvare il file:\n{ex.Message}", "Salva come connettore",
-                MessageBoxButton.OK, MessageBoxImage.Error);
+            ShowMessage($"Impossibile salvare il file:\n{ex.Message}", "Salva come connettore", MessageBoxImage.Error);
             return;
         }
         ReloadLibrary();
@@ -108,15 +102,12 @@ public partial class MainWindow
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException)
         {
-            MessageBox.Show(this, $"Impossibile leggere il file:\n{ex.Message}", "Importa connettore",
-                MessageBoxButton.OK, MessageBoxImage.Error);
+            ShowMessage($"Impossibile leggere il file:\n{ex.Message}", "Importa connettore", MessageBoxImage.Error);
             return;
         }
         if (result.Connector == null || ComponentTemplate.FromShapes(result.Entities, result.Connector) == null)
         {
-            MessageBox.Show(this,
-                "Il file non è un connettore. Per usarlo come connettore seleziona le sue forme e salvalo con \"Salva selezione come connettore\".",
-                "Importa connettore", MessageBoxButton.OK, MessageBoxImage.Warning);
+            ShowMessage("Il file non è un connettore. Per usarlo come connettore seleziona le sue forme e salvalo con \"Salva selezione come connettore\".", "Importa connettore", MessageBoxImage.Warning);
             return;
         }
         string destination = System.IO.Path.Combine(CustomConnectorLibrary.Folder, System.IO.Path.GetFileName(dialog.FileName));
@@ -128,8 +119,7 @@ public partial class MainWindow
             if (!same)
             {
                 if (File.Exists(destination)
-                    && MessageBox.Show(this, "Nella libreria esiste già un file con questo nome. Sostituirlo?", "Importa connettore",
-                        MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
+                    && MessageBox.Show(this, "Nella libreria esiste già un file con questo nome. Sostituirlo?", "Importa connettore", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
                 {
                     return;
                 }
@@ -138,8 +128,7 @@ public partial class MainWindow
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            MessageBox.Show(this, $"Impossibile copiare il file nella libreria:\n{ex.Message}", "Importa connettore",
-                MessageBoxButton.OK, MessageBoxImage.Error);
+            ShowMessage($"Impossibile copiare il file nella libreria:\n{ex.Message}", "Importa connettore", MessageBoxImage.Error);
             return;
         }
         ReloadLibrary();
@@ -199,8 +188,7 @@ public partial class MainWindow
         }
         catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception)
         {
-            MessageBox.Show(this, $"Impossibile aprire la cartella dei connettori:\n{ex.Message}", "Cartella connettori",
-                MessageBoxButton.OK, MessageBoxImage.Error);
+            ShowMessage($"Impossibile aprire la cartella dei connettori:\n{ex.Message}", "Cartella connettori", MessageBoxImage.Error);
         }
     }
 }

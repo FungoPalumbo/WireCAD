@@ -31,6 +31,13 @@ public class SheathEntity : EntityBase
     private string _innerLayer = InnerCalza;
     private double _innerPercent = 85;
 
+    private static readonly string[] TypeChoices =
+        { "Guaina corrugata", "Guaina termorestringente", "Treccia", "Nastro", "Tubo", TwistedType, FerriteType };
+
+    private static readonly string[] InnerLayerChoices = { InnerNone, InnerCalza, InnerTube };
+
+    private static readonly string[] InsideChoices = { InsideVisible, InsideFaded, InsideHidden };
+
     public const string InnerNone = "Nessuno";
     public const string InnerCalza = "Calza";
     public const string InnerTube = "Tubo";
@@ -90,9 +97,6 @@ public class SheathEntity : EntityBase
     /// <summary>Vero se la guaina segue il tracciato di un'altra (e si sposta con essa).</summary>
     public bool IsAttached => ParentId != null;
 
-    /// <summary>Lunghezza dell'asse (mm), per valutare le ascisse sulla guaina base.</summary>
-    public double CenterLength => PathLength(CenterLine());
-
     /// <summary>Proietta un punto sull'asse: ascissa curvilinea e distanza dall'asse.</summary>
     public bool TryProject(Point point, out double along, out double distance)
     {
@@ -132,6 +136,7 @@ public class SheathEntity : EntityBase
         {
             _points = sub;
             _bendRadius = 0;
+            _centerLine = null;
         }
     }
 
@@ -202,9 +207,6 @@ public class SheathEntity : EntityBase
         return count > 1 ? width / (2 * Math.Sin(Math.PI / count)) + Math.Clamp(width * 0.25, 0.15, 0.5) : 0;
     }
 
-    /// <summary>Colore (esadecimale) del filo indicato dell'intreccio.</summary>
-    public string StrandColor(int index) => StrandColors(index).Primary;
-
     /// <summary>
     /// Colori del filo indicato: quelli scelti a mano ("Rosso" oppure "Rosso/Bianco" per un filo bicolore) oppure, se vuoti,
     /// quelli del filo collegato al pin corrispondente; senza fili collegati il filo è bianco.
@@ -215,8 +217,8 @@ public class SheathEntity : EntityBase
         if (index < names.Length)
         {
             string[] parts = names[index].Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-            string? first = parts.Length > 0 ? ColorPalette.Resolve(parts[0]) : null;
-            string? second = parts.Length > 1 ? ColorPalette.Resolve(parts[1]) : null;
+            string? first = parts.Length > 0 ? WireEntity.ResolveColor(parts[0]) ?? ColorPalette.Resolve(parts[0]) : null;
+            string? second = parts.Length > 1 ? WireEntity.ResolveColor(parts[1]) ?? ColorPalette.Resolve(parts[1]) : null;
             if (first != null)
             {
                 return (first, second);
@@ -439,7 +441,7 @@ public class SheathEntity : EntityBase
             double bodyHalf = width / 2;
             double edgeHalf = (width + Math.Clamp(width * 0.25, 0.15, 0.5) + extraEdge) / 2;
             secondary[k] = StrandColors(k).Secondary;
-            stripeLength[k] = Math.Max(width * 3, 2);
+            stripeLength[k] = SceneBuilder.StripeLength;
             bodyLeft[k] = new Point[steps + 1];
             bodyRight[k] = new Point[steps + 1];
             edgeLeft[k] = new Point[steps + 1];
@@ -468,7 +470,7 @@ public class SheathEntity : EntityBase
                 double step = stripeLength[k];
                 for (int m = (int)Math.Floor(distance[from] / step); m * step < distance[to]; m++)
                 {
-                    if (m % 2 != 0 && RibbonSlice(bodyLeft[k], bodyRight[k], distance, Math.Max(m * step, distance[from]),
+                    if (m % 2 == 0 && RibbonSlice(bodyLeft[k], bodyRight[k], distance, Math.Max(m * step, distance[from]),
                         Math.Min((m + 1) * step, distance[to])) is List<Point> stripe)
                     {
                         stripes.Add(stripe);
@@ -807,8 +809,8 @@ public class SheathEntity : EntityBase
         }
         start = center[0];
         end = center[center.Count - 1];
-        startDirection = Unit(center[1] - center[0]);
-        endDirection = Unit(center[center.Count - 1] - center[center.Count - 2]);
+        startDirection = GeometryMath.Unit(center[1] - center[0]);
+        endDirection = GeometryMath.Unit(center[center.Count - 1] - center[center.Count - 2]);
         return true;
     }
 
@@ -990,12 +992,6 @@ public class SheathEntity : EntityBase
         }
     }
 
-    private static Vector Unit(Vector vector)
-    {
-        double length = vector.Length;
-        return length < 1e-12 ? new Vector(0, 0) : new Vector(vector.X / length, vector.Y / length);
-    }
-
     private List<Point> Deduplicated()
     {
         List<Point> unique = new();
@@ -1010,7 +1006,14 @@ public class SheathEntity : EntityBase
     }
 
     /// <summary>Asse della guaina con i vertici interni raccordati da archi di raggio <see cref="BendRadius"/>.</summary>
-    public IReadOnlyList<Point> CenterLine()
+    public IReadOnlyList<Point> CenterLine() => _centerLine ??= ComputeCenterLine();
+
+    // l'asse dipende solo da vertici e raggio di curva: si ricalcola dopo ogni modifica e non a ogni richiesta (pin, etichette, geometria)
+    private IReadOnlyList<Point>? _centerLine;
+
+    protected override void OnInvalidated() => _centerLine = null;
+
+    private IReadOnlyList<Point> ComputeCenterLine()
     {
         List<Point> points = Deduplicated();
         if (_bendRadius <= 0 || points.Count < 3)
@@ -1020,8 +1023,8 @@ public class SheathEntity : EntityBase
         List<Point> result = new() { points[0] };
         for (int i = 1; i < points.Count - 1; i++)
         {
-            Vector a = Unit(points[i] - points[i - 1]);
-            Vector b = Unit(points[i + 1] - points[i]);
+            Vector a = GeometryMath.Unit(points[i] - points[i - 1]);
+            Vector b = GeometryMath.Unit(points[i + 1] - points[i]);
             double cross = a.X * b.Y - a.Y * b.X;
             double phi = Math.Atan2(Math.Abs(cross), a * b);
             if (phi < 1e-3 || phi > Math.PI - 1e-3)
@@ -1477,7 +1480,7 @@ public class SheathEntity : EntityBase
         {
             new TextField("Tag", () => Tag, v => Tag = v),
             new TextField("Tipo", () => SheathType, v => SheathType = v,
-                new[] { "Guaina corrugata", "Guaina termorestringente", "Treccia", "Nastro", "Tubo", TwistedType, FerriteType })
+                TypeChoices)
         };
         if (IsFerrite)
         {
@@ -1494,13 +1497,13 @@ public class SheathEntity : EntityBase
         if (CanStrip)
         {
             fields.Add(new TextField("Strato interno scoperto", () => InnerLayer, v => InnerLayer = v,
-                new[] { InnerNone, InnerCalza, InnerTube }));
+                InnerLayerChoices));
             fields.Add(new TextField("Colore strato interno", () => InnerColor, v => InnerColor = v, ColorPalette.Choices));
         }
         if (!IsTwisted)
         {
             fields.Add(new TextField("Fili all'interno", () => Inside, v => Inside = v,
-                new[] { InsideVisible, InsideFaded, InsideHidden }));
+                InsideChoices));
         }
         fields.Add(new TextField("Codice articolo", () => PartNumber, v => PartNumber = v));
         fields.Add(new TextField("Costruttore", () => Manufacturer, v => Manufacturer = v));
@@ -1544,7 +1547,7 @@ public class SheathEntity : EntityBase
         double bestDistance = double.MaxValue;
         for (int i = 0; i + 1 < _points.Count; i++)
         {
-            double distance = WireEntity.DistanceToSegment(point, _points[i], _points[i + 1]);
+            double distance = GeometryMath.DistanceToSegment(point, _points[i], _points[i + 1]);
             if (distance < bestDistance)
             {
                 bestDistance = distance;
@@ -1617,23 +1620,23 @@ public class SheathEntity : EntityBase
         data["part"] = _partNumber;
         data["maker"] = _manufacturer;
         data["real"] = _realLength;
-        data["dia"] = _diameter.ToString("R", CultureInfo.InvariantCulture);
-        data["drawn"] = _drawnWidth.ToString("R", CultureInfo.InvariantCulture);
-        data["bend"] = _bendRadius.ToString("R", CultureInfo.InvariantCulture);
+        data["dia"] = Num(_diameter);
+        data["drawn"] = Num(_drawnWidth);
+        data["bend"] = Num(_bendRadius);
         data["wires"] = _wireCount.ToString(CultureInfo.InvariantCulture);
-        data["stripA"] = _stripStart.ToString("R", CultureInfo.InvariantCulture);
-        data["stripB"] = _stripEnd.ToString("R", CultureInfo.InvariantCulture);
+        data["stripA"] = Num(_stripStart);
+        data["stripB"] = Num(_stripEnd);
         data["layer"] = _innerLayer;
-        data["layerPct"] = _innerPercent.ToString("R", CultureInfo.InvariantCulture);
+        data["layerPct"] = Num(_innerPercent);
         data["layerColor"] = _innerColor;
         data["twistColors"] = _twistColors;
-        data["twistPitch"] = _twistPitch.ToString("R", CultureInfo.InvariantCulture);
+        data["twistPitch"] = Num(_twistPitch);
         data["rating"] = _rating;
         if (ParentId is Guid parentId)
         {
             data["parent"] = parentId.ToString();
-            data["pfrom"] = ParentFrom.ToString("R", CultureInfo.InvariantCulture);
-            data["pto"] = ParentTo.ToString("R", CultureInfo.InvariantCulture);
+            data["pfrom"] = Num(ParentFrom);
+            data["pto"] = Num(ParentTo);
         }
         if (_brokenLinks.Count > 0)
         {
@@ -1686,7 +1689,7 @@ public static class SheathAnalyzer
         double best = double.MaxValue;
         for (int i = 0; i + 1 < polyline.Count; i++)
         {
-            best = Math.Min(best, WireEntity.DistanceToSegment(point, polyline[i], polyline[i + 1]));
+            best = Math.Min(best, GeometryMath.DistanceToSegment(point, polyline[i], polyline[i + 1]));
         }
         return best;
     }
@@ -1722,10 +1725,10 @@ public static class SheathAnalyzer
             Point exit = sheath.GetPinPosition(sheath.WireCount + k);
             // il collegamento è sostituito dalla guaina annidata se un filo lo congiunge a un suo pin
             bool carried = list.Any(wire =>
-                (WireEntity.Near(entry, wire.StartPoint, 0.01) && childPins.Any(pin => WireEntity.Near(pin, wire.EndPoint, 0.01)))
-                || (WireEntity.Near(entry, wire.EndPoint, 0.01) && childPins.Any(pin => WireEntity.Near(pin, wire.StartPoint, 0.01)))
-                || (WireEntity.Near(exit, wire.StartPoint, 0.01) && childPins.Any(pin => WireEntity.Near(pin, wire.EndPoint, 0.01)))
-                || (WireEntity.Near(exit, wire.EndPoint, 0.01) && childPins.Any(pin => WireEntity.Near(pin, wire.StartPoint, 0.01))));
+                (GeometryMath.AtPin(entry, wire.StartPoint) && childPins.Any(pin => GeometryMath.AtPin(pin, wire.EndPoint)))
+                || (GeometryMath.AtPin(entry, wire.EndPoint) && childPins.Any(pin => GeometryMath.AtPin(pin, wire.StartPoint)))
+                || (GeometryMath.AtPin(exit, wire.StartPoint) && childPins.Any(pin => GeometryMath.AtPin(pin, wire.EndPoint)))
+                || (GeometryMath.AtPin(exit, wire.EndPoint) && childPins.Any(pin => GeometryMath.AtPin(pin, wire.StartPoint))));
             if (carried)
             {
                 used[k] = false;
@@ -1748,8 +1751,8 @@ public static class SheathAnalyzer
             Point entry = sheath.GetPinPosition(k);
             Point exit = sheath.GetPinPosition(sheath.WireCount + k);
             used.Add(list.Any(wire =>
-                WireEntity.Near(entry, wire.StartPoint, 0.01) || WireEntity.Near(entry, wire.EndPoint, 0.01)
-                || WireEntity.Near(exit, wire.StartPoint, 0.01) || WireEntity.Near(exit, wire.EndPoint, 0.01)));
+                GeometryMath.AtPin(entry, wire.StartPoint) || GeometryMath.AtPin(entry, wire.EndPoint)
+                || GeometryMath.AtPin(exit, wire.StartPoint) || GeometryMath.AtPin(exit, wire.EndPoint)));
         }
         return used;
     }
@@ -1772,7 +1775,7 @@ public static class SheathAnalyzer
             }
             foreach (WireEntity wire in wires)
             {
-                if (pins.Any(pin => WireEntity.Near(pin, wire.StartPoint, 0.01) || WireEntity.Near(pin, wire.EndPoint, 0.01)))
+                if (pins.Any(pin => GeometryMath.AtPin(pin, wire.StartPoint) || GeometryMath.AtPin(pin, wire.EndPoint)))
                 {
                     result.Add(wire);
                 }

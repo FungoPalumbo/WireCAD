@@ -85,7 +85,7 @@ public class DimensionEntity : EntityBase
 
     private List<(Point From, Point To)> Segments()
     {
-        Layout(out Point a, out Point b, out Vector along, out Vector normal, out _);
+        Layout(out Point a, out Point b, out _, out _, out _);
         List<(Point, Point)> segments = new();
         AddExtension(segments, _p1, a);
         AddExtension(segments, _p2, b);
@@ -266,8 +266,8 @@ public class DimensionEntity : EntityBase
 
     public override void Export(Dictionary<string, string> data)
     {
-        data["height"] = _textHeight.ToString("R", CultureInfo.InvariantCulture);
-        data["arrow"] = _arrowSize.ToString("R", CultureInfo.InvariantCulture);
+        data["height"] = Num(_textHeight);
+        data["arrow"] = Num(_arrowSize);
         data["decimals"] = _decimals.ToString(CultureInfo.InvariantCulture);
         if (_override.Length > 0)
         {

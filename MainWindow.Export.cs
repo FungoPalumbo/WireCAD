@@ -13,7 +13,7 @@ public partial class MainWindow
             _entities.ToList(),
             _sheetWidth,
             _sheetHeight,
-            CkTitleBlock.IsChecked == true,
+            ChromeVisible,
             CaptureSettings().TitleBlock);
     }
 
@@ -45,12 +45,12 @@ public partial class MainWindow
 
     private void MenuExportDxf_Click(object sender, RoutedEventArgs e)
     {
-        ExportDrawing("Esporta DXF", "DXF (*.dxf)|*.dxf", ".dxf", DxfExporter.Write);
+        ExportDrawing("Esporta DXF", "DXF (*.dxf)|*.dxf", ".dxf", CadExporter.WriteDxf);
     }
 
     private void MenuExportDwg_Click(object sender, RoutedEventArgs e)
     {
-        ExportDrawing("Esporta DWG", "DWG (*.dwg)|*.dwg", ".dwg", DwgExporter.Write);
+        ExportDrawing("Esporta DWG", "DWG (*.dwg)|*.dwg", ".dwg", CadExporter.WriteDwg);
     }
 
     private void MenuExportPdf_Click(object sender, RoutedEventArgs e)

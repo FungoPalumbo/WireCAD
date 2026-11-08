@@ -1,4 +1,3 @@
-using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using WireCAD.Controls;
@@ -152,7 +151,7 @@ public partial class MainWindow
     }
 
     /// <summary>Menu del tasto destro su una entità dell'elenco.</summary>
-    private void ShowEntityTreeMenu(EntityNode node)
+    private void ShowEntityTreeMenu()
     {
         ContextMenu menu = new() { Placement = PlacementMode.MousePoint };
 

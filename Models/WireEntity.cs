@@ -7,7 +7,7 @@ namespace WireCAD.Models;
 /// <summary>Filo elettrico: polilinea ortogonale con attributi (numero, colore, sezione...).</summary>
 public class WireEntity : EntityBase
 {
-    private const double Eps = 1e-6;
+    private const double Eps = GeometryMath.PointEpsilon;
 
     private static readonly Dictionary<string, string> ColorMap = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -25,6 +25,8 @@ public class WireEntity : EntityBase
         ["TQ"] = "#0891B2", ["TURCHESE"] = "#0891B2",
         ["GNYE"] = "#65A30D", ["YEGN"] = "#65A30D", ["GIALLOVERDE"] = "#65A30D", ["VERDEGIALLO"] = "#65A30D"
     };
+
+    private static readonly string[] AppearanceChoices = { "Linea semplice", "Realistico" };
 
     private static readonly string[] ColorChoices =
     {
@@ -257,7 +259,8 @@ public class WireEntity : EntityBase
 
     public override double LineWidth => _realistic ? DrawWidth : 0.5;
 
-    private static string? ResolveColor(string name)
+    /// <summary>Colore (esadecimale pieno) di un nome o codice colore dei fili ("Rosso", "RD", "GNYE"...); null se sconosciuto.</summary>
+    public static string? ResolveColor(string name)
     {
         string key = new string(name.Where(char.IsLetter).ToArray());
         return ColorMap.TryGetValue(key, out string? hex) ? hex : null;
@@ -289,29 +292,6 @@ public class WireEntity : EntityBase
         }
     }
 
-    public static bool Near(Point a, Point b)
-    {
-        return Math.Abs(a.X - b.X) < Eps && Math.Abs(a.Y - b.Y) < Eps;
-    }
-
-    public static bool Near(Point a, Point b, double tolerance)
-    {
-        return Math.Abs(a.X - b.X) < tolerance && Math.Abs(a.Y - b.Y) < tolerance;
-    }
-
-    public static double DistanceToSegment(Point point, Point a, Point b)
-    {
-        Vector ab = b - a;
-        double lengthSquared = ab.LengthSquared;
-        if (lengthSquared < 1e-12)
-        {
-            return (point - a).Length;
-        }
-        double t = Math.Clamp(((point - a) * ab) / lengthSquared, 0, 1);
-        Point projection = a + ab * t;
-        return (point - projection).Length;
-    }
-
     public static Geometry CreatePolyline(IReadOnlyList<Point> points)
     {
         if (points.Count < 2)
@@ -338,7 +318,7 @@ public class WireEntity : EntityBase
     {
         for (int i = 0; i + 1 < _points.Count; i++)
         {
-            if (DistanceToSegment(point, _points[i], _points[i + 1]) <= tolerance)
+            if (GeometryMath.DistanceToSegment(point, _points[i], _points[i + 1]) <= tolerance)
             {
                 return true;
             }
@@ -396,7 +376,7 @@ public class WireEntity : EntityBase
             {
                 StartComp = null;
             }
-            else if (!Near(target.Value, _points[0]))
+            else if (!GeometryMath.Near(target.Value, _points[0]))
             {
                 MovePoint(0, target.Value);
                 changed = true;
@@ -410,7 +390,7 @@ public class WireEntity : EntityBase
             {
                 EndComp = null;
             }
-            else if (!Near(target.Value, _points[last]))
+            else if (!GeometryMath.Near(target.Value, _points[last]))
             {
                 MovePoint(last, target.Value);
                 changed = true;
@@ -458,7 +438,7 @@ public class WireEntity : EntityBase
         List<Point> unique = new();
         foreach (Point point in _points)
         {
-            if (unique.Count == 0 || !Near(unique[unique.Count - 1], point))
+            if (unique.Count == 0 || !GeometryMath.Near(unique[unique.Count - 1], point))
             {
                 unique.Add(point);
             }
@@ -585,7 +565,7 @@ public class WireEntity : EntityBase
         {
             new TextField("Aspetto", () => Realistic ? "Realistico" : "Linea semplice",
                 v => Realistic = v.Trim().StartsWith("Real", StringComparison.OrdinalIgnoreCase),
-                new[] { "Linea semplice", "Realistico" }),
+                AppearanceChoices),
             new TextField("Numero filo", () => Number, v => Number = v),
             new TextField("Colore 1", () => Color, v => Color = v, ColorChoices),
             new TextField("Colore 2 (a strisce)", () => Color2, v => Color2 = v, SecondColorChoices),
@@ -679,8 +659,8 @@ public class WireEntity : EntityBase
         data["real"] = _realLength;
         data["ortho"] = Orthogonal ? "1" : "0";
         data["style"] = _realistic ? "band" : "line";
-        data["dia"] = _diameter.ToString("R", CultureInfo.InvariantCulture);
-        data["drawn"] = _drawnWidth.ToString("R", CultureInfo.InvariantCulture);
+        data["dia"] = Num(_diameter);
+        data["drawn"] = Num(_drawnWidth);
         if (StartComp.HasValue)
         {
             data["sc"] = StartComp.Value.ToString();

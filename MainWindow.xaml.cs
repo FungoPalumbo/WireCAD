@@ -7,6 +7,7 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Shapes;
+using WireCAD.Controls;
 using WireCAD.Models;
 using Path = System.Windows.Shapes.Path;
 
@@ -23,7 +24,9 @@ public partial class MainWindow : Window
     }
 
     private const double SheetMargin = 10;
-    private const double MinSheetSize = 50;
+    private const double MinSheetSize = 1;
+    // sotto questa scala il cartiglio sarebbe illeggibile: cornice e cartiglio non vengono mostrati
+    private const double MinTitleBlockScale = 0.5;
     private const double MaxSheetSize = 5000;
     private const double MinGridStep = 0.5;
     private const double MaxGridStep = 1000;
@@ -31,7 +34,6 @@ public partial class MainWindow : Window
     private const double MinGridScreenSpacing = 4;
     private const double MinZoom = 0.08;
     private const double MaxZoom = 80;
-    private const double DefaultStroke = 0.35;
     private const double GripScreenSize = 8;
 
     private sealed record SheetPreset(string Label, double Width, double Height);
@@ -82,7 +84,7 @@ public partial class MainWindow : Window
     private double _gridStep = 5;
     private int _gridMajorEvery = 10;
     private Point _gridOrigin = new(0, 0);
-    private bool _initialized;
+    private readonly bool _initialized;
     private bool _updatingPreset;
 
     private ToolType _tool = ToolType.Select;
@@ -112,14 +114,15 @@ public partial class MainWindow : Window
         StatusCount.Text = "Entità: 0";
         PropertiesPanel.IsEnabled = false;
         SheetPresetBox.ItemsSource = SheetPresets;
-        LibraryList.ItemsSource = ComponentTemplate.All;        _initialized = true;
+        LibraryList.ItemsSource = ComponentTemplate.All;
+        _initialized = true;
         ApplySheetSize();
         UpdateGridBoxes();
         Loaded += (_, _) => FitView();
         StateChanged += MainWindow_StateChanged;
         SetTool(ToolType.Select);
-        _arcHoldTimer.Tick += ArcHoldTimer_Tick;
-        _wireHoldTimer.Tick += WireHoldTimer_Tick;
+        _arcHold = new HoldMenu(ShowArcMenu);
+        _wireHold = new HoldMenu(ShowWireMenu);
         _lastSnapshot = Snapshot();
         UpdateTitle();
     }
@@ -233,12 +236,14 @@ public partial class MainWindow : Window
         SheetRect.Width = _sheetWidth;
         SheetRect.Height = _sheetHeight;
 
-        FrameBorder.Width = _sheetWidth - 2 * SheetMargin;
-        FrameBorder.Height = _sheetHeight - 2 * SheetMargin;
+        FrameBorder.Width = Math.Max(0, _sheetWidth - 2 * SheetMargin);
+        FrameBorder.Height = Math.Max(0, _sheetHeight - 2 * SheetMargin);
 
         double blockScale = Math.Min(1, Math.Min(
             FrameBorder.Width / TitleBlockCtl.Width,
             FrameBorder.Height / TitleBlockCtl.Height));
+        _frameFits = blockScale >= MinTitleBlockScale;
+        UpdateChromeVisibility();
         TitleBlockCtl.RenderTransformOrigin = new Point(1, 1);
         TitleBlockCtl.RenderTransform = new ScaleTransform(blockScale, blockScale);
         Canvas.SetLeft(TitleBlockCtl, _sheetWidth - SheetMargin - TitleBlockCtl.Width);
@@ -247,6 +252,16 @@ public partial class MainWindow : Window
         UpdateGrid();
         UpdateSheetBoxes();
         FitView();
+    }
+
+    private bool _frameFits = true;
+
+    /// <summary>Cornice e cartiglio sono attivi e il foglio è abbastanza grande per contenerli.</summary>
+    private bool ChromeVisible => CkTitleBlock.IsChecked == true && _frameFits;
+
+    private void UpdateChromeVisibility()
+    {
+        ChromeCanvas.Visibility = ChromeVisible ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private void UpdateSheetBoxes()
@@ -1416,8 +1431,7 @@ public partial class MainWindow : Window
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            MessageBox.Show(this, $"Impossibile salvare il file:\n{ex.Message}", "Salvataggio",
-                MessageBoxButton.OK, MessageBoxImage.Error);
+            ShowMessage($"Impossibile salvare il file:\n{ex.Message}", "Salvataggio", MessageBoxImage.Error);
             return false;
         }
     }
@@ -1495,9 +1509,7 @@ public partial class MainWindow : Window
     {
         if (group.IsModified)
         {
-            MessageBoxResult answer = MessageBox.Show(this,
-                $"\"{group.Name}\" contiene modifiche non salvate.\nEliminarlo dal foglio comunque?",
-                "Elimina dal foglio", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+            MessageBoxResult answer = MessageBox.Show(this, $"\"{group.Name}\" contiene modifiche non salvate.\nEliminarlo dal foglio comunque?", "Elimina dal foglio", MessageBoxButton.YesNo, MessageBoxImage.Warning);
             if (answer != MessageBoxResult.Yes)
             {
                 return;
@@ -1528,14 +1540,12 @@ public partial class MainWindow : Window
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException)
         {
-            MessageBox.Show(this, $"Impossibile importare il file:\n{ex.Message}", "Importazione",
-                MessageBoxButton.OK, MessageBoxImage.Error);
+            ShowMessage($"Impossibile importare il file:\n{ex.Message}", "Importazione", MessageBoxImage.Error);
             return;
         }
         if (result.Entities.Count == 0)
         {
-            MessageBox.Show(this, "Il file non contiene forme valide.", "Importazione",
-                MessageBoxButton.OK, MessageBoxImage.Warning);
+            ShowMessage("Il file non contiene forme valide.", "Importazione", MessageBoxImage.Warning);
             return;
         }
 
@@ -1758,7 +1768,7 @@ public partial class MainWindow : Window
             {
                 SetSelection(new[] { node.Entity! });
             }
-            ShowEntityTreeMenu(node);
+            ShowEntityTreeMenu();
         }
     }
 

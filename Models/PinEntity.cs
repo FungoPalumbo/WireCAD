@@ -135,7 +135,7 @@ public class PinEntity : EntityBase
     public override void Export(Dictionary<string, string> data)
     {
         data["number"] = _number;
-        data["dia"] = _diameter.ToString("R", System.Globalization.CultureInfo.InvariantCulture);
+        data["dia"] = Num(_diameter);
     }
 
     public override void Import(Dictionary<string, string> data)

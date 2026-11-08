@@ -18,6 +18,7 @@ public partial class MainWindow
     private string _lastSnapshot = "";
     private bool _restoring;
     private string? _projectPath;
+    private string? _openedCadName;
     private bool _dirty;
     private string? _clipboard;
     private int _pasteCount;
@@ -36,7 +37,53 @@ public partial class MainWindow
 
     private string Snapshot()
     {
-        return ProjectFile.Serialize(null, _entities, GroupOf, false);
+        // oltre alle entità lo snapshot comprende il cartiglio, così anche le sue modifiche si annullano e segnano il progetto come modificato
+        ProjectSettings titleBlock = new() { ShowTitleBlock = CkTitleBlock.IsChecked == true };
+        foreach (KeyValuePair<string, string> field in CaptureTitleBlockFields())
+        {
+            titleBlock.TitleBlock[field.Key] = field.Value;
+        }
+        ImageEntity.SnapshotMode = true;
+        try
+        {
+            return ProjectFile.Serialize(titleBlock, _entities, GroupOf, false);
+        }
+        finally
+        {
+            ImageEntity.SnapshotMode = false;
+        }
+    }
+
+    /// <summary>Messaggio con il solo pulsante OK, con la finestra principale come proprietaria.</summary>
+    private void ShowMessage(string text, string caption, MessageBoxImage icon)
+    {
+        MessageBox.Show(this, text, caption, MessageBoxButton.OK, icon);
+    }
+
+    private void TitleBlockBox_LostFocus(object sender, KeyboardFocusChangedEventArgs e) => CommitChange();
+
+    private void TitleBlockOption_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_initialized)
+        {
+            UpdateChromeVisibility();
+            CommitChange();
+        }
+    }
+
+    /// <summary>Riporta nel foglio il cartiglio di uno snapshot (senza toccare dimensione del foglio, griglia e vista).</summary>
+    private void ApplyTitleBlock(ProjectSettings settings)
+    {
+        CkTitleBlock.IsChecked = settings.ShowTitleBlock;
+        string Field(string key, string fallback) => settings.TitleBlock.TryGetValue(key, out string? value) ? value : fallback;
+        TitleBlockCtl.DrawingTitle = Field("title", TitleBlockCtl.DrawingTitle);
+        TitleBlockCtl.CompanyName = Field("company", TitleBlockCtl.CompanyName);
+        TitleBlockCtl.AuthorName = Field("author", TitleBlockCtl.AuthorName);
+        TitleBlockCtl.DrawingNumber = Field("number", TitleBlockCtl.DrawingNumber);
+        TitleBlockCtl.ScaleValue = Field("scale", TitleBlockCtl.ScaleValue);
+        TitleBlockCtl.DateValue = Field("date", TitleBlockCtl.DateValue);
+        TitleBlockCtl.RevisionValue = Field("revision", TitleBlockCtl.RevisionValue);
+        TitleBlockCtl.SheetValue = Field("sheet", TitleBlockCtl.SheetValue);
     }
 
     /// <summary>Registra lo stato corrente come nuovo punto di undo, se è cambiato qualcosa.</summary>
@@ -96,6 +143,10 @@ public partial class MainWindow
         try
         {
             ClearDocument();
+            if (data.Settings != null)
+            {
+                ApplyTitleBlock(data.Settings);
+            }
             LoadEntities(data.Entities);
         }
         finally
@@ -198,7 +249,9 @@ public partial class MainWindow
 
     private void UpdateTitle()
     {
-        string name = _projectPath == null ? "Senza titolo" : System.IO.Path.GetFileName(_projectPath);
+        string name = _projectPath != null
+            ? System.IO.Path.GetFileName(_projectPath)
+            : _openedCadName ?? "Senza titolo";
         Title = $"WireCAD – {name}{(_dirty ? " *" : "")}";
     }
 
@@ -216,14 +269,10 @@ public partial class MainWindow
             WirePrefix = _wirePrefix,
             ThicknessFactor = DrawingScale.ThicknessFactor
         };
-        settings.TitleBlock["title"] = TitleBlockCtl.DrawingTitle;
-        settings.TitleBlock["company"] = TitleBlockCtl.CompanyName;
-        settings.TitleBlock["author"] = TitleBlockCtl.AuthorName;
-        settings.TitleBlock["number"] = TitleBlockCtl.DrawingNumber;
-        settings.TitleBlock["scale"] = TitleBlockCtl.ScaleValue;
-        settings.TitleBlock["date"] = TitleBlockCtl.DateValue;
-        settings.TitleBlock["revision"] = TitleBlockCtl.RevisionValue;
-        settings.TitleBlock["sheet"] = TitleBlockCtl.SheetValue;
+        foreach (KeyValuePair<string, string> field in CaptureTitleBlockFields())
+        {
+            settings.TitleBlock[field.Key] = field.Value;
+        }
         return settings;
     }
 
@@ -248,21 +297,8 @@ public partial class MainWindow
             _gridOrigin = new Point(settings.GridOriginX, settings.GridOriginY);
         }
         DrawingScale.ThicknessFactor = DrawingScale.ClampFactor(settings.ThicknessFactor <= 0 ? 1 : settings.ThicknessFactor);
-        CkTitleBlock.IsChecked = settings.ShowTitleBlock;
         _wirePrefix = string.IsNullOrWhiteSpace(settings.WirePrefix) ? "W" : settings.WirePrefix.Trim();
-
-        string Field(string key, string fallback)
-        {
-            return settings.TitleBlock.TryGetValue(key, out string? value) ? value : fallback;
-        }
-        TitleBlockCtl.DrawingTitle = Field("title", TitleBlockCtl.DrawingTitle);
-        TitleBlockCtl.CompanyName = Field("company", TitleBlockCtl.CompanyName);
-        TitleBlockCtl.AuthorName = Field("author", TitleBlockCtl.AuthorName);
-        TitleBlockCtl.DrawingNumber = Field("number", TitleBlockCtl.DrawingNumber);
-        TitleBlockCtl.ScaleValue = Field("scale", TitleBlockCtl.ScaleValue);
-        TitleBlockCtl.DateValue = Field("date", TitleBlockCtl.DateValue);
-        TitleBlockCtl.RevisionValue = Field("revision", TitleBlockCtl.RevisionValue);
-        TitleBlockCtl.SheetValue = Field("sheet", TitleBlockCtl.SheetValue);
+        ApplyTitleBlock(settings);
 
         ApplySheetSize();
         UpdateGridBoxes();
@@ -293,11 +329,11 @@ public partial class MainWindow
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            MessageBox.Show(this, $"Impossibile salvare il progetto:\n{ex.Message}", "Salvataggio",
-                MessageBoxButton.OK, MessageBoxImage.Error);
+            ShowMessage($"Impossibile salvare il progetto:\n{ex.Message}", "Salvataggio", MessageBoxImage.Error);
             return false;
         }
         _projectPath = path;
+        _openedCadName = null;
         SetDirty(false);
         StatusHint.Text = $"Progetto salvato in {path}";
         return true;
@@ -309,9 +345,7 @@ public partial class MainWindow
         {
             return true;
         }
-        MessageBoxResult answer = MessageBox.Show(this,
-            "Ci sono modifiche non salvate. Salvarle prima di continuare?",
-            "WireCAD", MessageBoxButton.YesNoCancel, MessageBoxImage.Warning);
+        MessageBoxResult answer = MessageBox.Show(this, "Ci sono modifiche non salvate. Salvarle prima di continuare?", "WireCAD", MessageBoxButton.YesNoCancel, MessageBoxImage.Warning);
         if (answer == MessageBoxResult.Cancel)
         {
             return false;
@@ -327,6 +361,7 @@ public partial class MainWindow
     {
         _undo.Clear();
         _redo.Clear();
+        ImageEntity.ClearSnapshotStore();
         _lastSnapshot = Snapshot();
     }
 
@@ -347,6 +382,7 @@ public partial class MainWindow
         }
         _nameCounters.Clear();
         _projectPath = null;
+        _openedCadName = null;
         ResetHistory();
         SetDirty(false);
         ScheduleLabels();
@@ -361,13 +397,20 @@ public partial class MainWindow
         }
         Microsoft.Win32.OpenFileDialog dialog = new()
         {
-            Title = "Apri progetto",
-            Filter = ProjectFile.Filter,
+            Title = "Apri",
+            Filter = "Progetti e disegni CAD (*.wcproj;*.dxf;*.dwg)|*.wcproj;*.dxf;*.dwg|"
+                + "Progetto WireCAD (*.wcproj)|*.wcproj|Disegni CAD (*.dxf;*.dwg)|*.dxf;*.dwg|Tutti i file (*.*)|*.*",
             DefaultExt = ProjectFile.Extension,
             CheckFileExists = true
         };
         if (dialog.ShowDialog(this) != true)
         {
+            return;
+        }
+        string extension = System.IO.Path.GetExtension(dialog.FileName);
+        if (extension.Equals(".dxf", StringComparison.OrdinalIgnoreCase) || extension.Equals(".dwg", StringComparison.OrdinalIgnoreCase))
+        {
+            OpenCadDocument(dialog.FileName);
             return;
         }
         ProjectData data;
@@ -377,8 +420,7 @@ public partial class MainWindow
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException)
         {
-            MessageBox.Show(this, $"Impossibile aprire il progetto:\n{ex.Message}", "Apertura",
-                MessageBoxButton.OK, MessageBoxImage.Error);
+            ShowMessage($"Impossibile aprire il progetto:\n{ex.Message}", "Apertura", MessageBoxImage.Error);
             return;
         }
         _restoring = true;
@@ -396,6 +438,7 @@ public partial class MainWindow
             _restoring = false;
         }
         _projectPath = dialog.FileName;
+        _openedCadName = null;
         ResetHistory();
         SetDirty(false);
         ScheduleLabels();

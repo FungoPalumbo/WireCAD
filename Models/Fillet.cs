@@ -5,12 +5,6 @@ namespace WireCAD.Models;
 /// <summary>Raccordo (fillet) tra due linee con un arco di raggio assegnato.</summary>
 public static class Fillet
 {
-    private static Vector Unit(Vector vector)
-    {
-        double length = vector.Length;
-        return length < 1e-12 ? new Vector(0, 0) : new Vector(vector.X / length, vector.Y / length);
-    }
-
     private static Point Round(Point point)
     {
         return new Point(Math.Round(point.X, 6), Math.Round(point.Y, 6));
@@ -30,8 +24,8 @@ public static class Fillet
         out string error)
     {
         error = string.Empty;
-        Vector d1 = Unit(first.B - first.A);
-        Vector d2 = Unit(second.B - second.A);
+        Vector d1 = GeometryMath.Unit(first.B - first.A);
+        Vector d2 = GeometryMath.Unit(second.B - second.A);
         if (d1.Length < 0.5 || d2.Length < 0.5)
         {
             error = "Raccordo impossibile: un tratto ha lunghezza nulla.";
@@ -74,7 +68,7 @@ public static class Fillet
 
         Point t1 = Round(corner + u1 * tangent);
         Point t2 = Round(corner + u2 * tangent);
-        Vector bisector = Unit(u1 + u2);
+        Vector bisector = GeometryMath.Unit(u1 + u2);
         Point middle = Round(corner + bisector * (radius / Math.Sin(theta / 2) - radius));
 
         if (a1 <= b1)

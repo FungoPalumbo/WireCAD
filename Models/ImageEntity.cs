@@ -1,4 +1,3 @@
-using System.Globalization;
 using System.IO;
 using System.Windows;
 using System.Windows.Media;
@@ -79,6 +78,8 @@ public class ImageEntity : EntityBase
 
     private void LoadBytes(byte[] bytes)
     {
+        _encoded = null;
+        _hash = null;
         using MemoryStream stream = new(bytes);
         BitmapImage image = new();
         image.BeginInit();
@@ -206,15 +207,45 @@ public class ImageEntity : EntityBase
         NotifyChanged();
     }
 
+    /// <summary>
+    /// Vero mentre si scrive uno snapshot per l'annulla: l'immagine non viene copiata in ogni snapshot ma registrata una sola
+    /// volta in un deposito, e lo snapshot ne conserva solo il riferimento.
+    /// </summary>
+    public static bool SnapshotMode { get; set; }
+
+    private static readonly Dictionary<string, byte[]> SnapshotStore = new();
+
+    /// <summary>Svuota il deposito delle immagini degli snapshot (quando la cronologia di annulla ricomincia).</summary>
+    public static void ClearSnapshotStore()
+    {
+        SnapshotStore.Clear();
+    }
+
+    private string? _encoded;
+    private string? _hash;
+
     public override void Export(Dictionary<string, string> data)
     {
-        data["opacity"] = _opacity.ToString("R", CultureInfo.InvariantCulture);
-        data["data"] = Convert.ToBase64String(_bytes);
+        data["opacity"] = Num(_opacity);
+        if (SnapshotMode)
+        {
+            _hash ??= Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(_bytes));
+            SnapshotStore[_hash] = _bytes;
+            data["ref"] = _hash;
+            return;
+        }
+        _encoded ??= Convert.ToBase64String(_bytes);
+        data["data"] = _encoded;
     }
 
     public override void Import(Dictionary<string, string> data)
     {
         _opacity = Math.Clamp(GetDouble(data, "opacity", 1), 0.05, 1);
+        if (SnapshotStore.TryGetValue(GetText(data, "ref"), out byte[]? stored))
+        {
+            LoadBytes(stored);
+            return;
+        }
         string encoded = GetText(data, "data");
         if (encoded.Length == 0)
         {

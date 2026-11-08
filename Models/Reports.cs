@@ -158,10 +158,12 @@ public static class ErcChecker
 /// <summary>Generazione dei report di produzione in formato CSV (separatore punto e virgola).</summary>
 public static class Reports
 {
+    private static readonly char[] CsvSpecialChars = { ';', '"', '\n', '\r' };
+
     private static string Cell(string? value)
     {
         string text = value ?? string.Empty;
-        if (text.IndexOfAny(new[] { ';', '"', '\n', '\r' }) >= 0)
+        if (text.IndexOfAny(CsvSpecialChars) >= 0)
         {
             return "\"" + text.Replace("\"", "\"\"") + "\"";
         }
@@ -175,11 +177,6 @@ public static class Reports
 
     private static string Num(double value) => value.ToString("0.#", CultureInfo.CurrentCulture);
 
-    private static bool Near(Point a, Point b)
-    {
-        return Math.Abs(a.X - b.X) < 0.01 && Math.Abs(a.Y - b.Y) < 0.01;
-    }
-
     /// <summary>Descrive cosa si trova in un punto: "TAG:pin", "Giunzione" oppure "libero".</summary>
     public static string EndName(IReadOnlyList<EntityBase> entities, Point point)
     {
@@ -187,7 +184,7 @@ public static class Reports
         {
             for (int i = 0; i < entity.PinCount; i++)
             {
-                if (!Near(entity.GetPinPosition(i), point))
+                if (!GeometryMath.AtPin(entity.GetPinPosition(i), point))
                 {
                     continue;
                 }
@@ -255,8 +252,30 @@ public static class Reports
             return item;
         }
 
+        List<SheathEntity> bundles = entities.OfType<SheathEntity>().Where(item => item.WireCount > 0).ToList();
+        HashSet<Guid> bundleIds = bundles.Select(item => item.Id).ToHashSet();
+
+        // un fascio annidato corre dentro quello esterno: la sua lunghezza e i fili che lo collegano ai pin del fascio
+        // esterno sono già compresi nella lunghezza di quest'ultimo e non vanno sommati una seconda volta
+        HashSet<WireEntity> insideWires = new();
+        foreach (SheathEntity child in bundles.Where(item => item.ParentId is Guid id && bundleIds.Contains(id)))
+        {
+            SheathEntity outer = bundles.First(item => item.Id == child.ParentId);
+            foreach (WireEntity wire in wires)
+            {
+                bool startOuter = AtAnyPin(outer, wire.StartPoint);
+                bool endOuter = AtAnyPin(outer, wire.EndPoint);
+                bool startChild = AtAnyPin(child, wire.StartPoint);
+                bool endChild = AtAnyPin(child, wire.EndPoint);
+                if ((startOuter && endChild) || (startChild && endOuter))
+                {
+                    insideWires.Add(wire);
+                }
+            }
+        }
+
         List<(WireEntity Anchor, SheathEntity Sheath)> passes = new();
-        foreach (SheathEntity sheath in entities.OfType<SheathEntity>().Where(item => item.WireCount > 0))
+        foreach (SheathEntity sheath in bundles)
         {
             for (int k = 0; k < sheath.WireCount; k++)
             {
@@ -267,8 +286,8 @@ public static class Reports
                 }
                 Point entry = sheath.GetPinPosition(k);
                 Point exit = sheath.GetPinPosition(sheath.WireCount + k);
-                List<WireEntity> before = wires.Where(item => Near(item.StartPoint, entry) || Near(item.EndPoint, entry)).ToList();
-                List<WireEntity> after = wires.Where(item => Near(item.StartPoint, exit) || Near(item.EndPoint, exit)).ToList();
+                List<WireEntity> before = wires.Where(item => GeometryMath.AtPin(item.StartPoint, entry) || GeometryMath.AtPin(item.EndPoint, entry)).ToList();
+                List<WireEntity> after = wires.Where(item => GeometryMath.AtPin(item.StartPoint, exit) || GeometryMath.AtPin(item.EndPoint, exit)).ToList();
                 if (before.Count == 0 || after.Count == 0)
                 {
                     continue;
@@ -280,6 +299,10 @@ public static class Reports
                         parent[Find(first)] = Find(second);
                     }
                 }
+                if (sheath.ParentId is Guid parentId && bundleIds.Contains(parentId))
+                {
+                    continue;
+                }
                 passes.Add((before[0], sheath));
             }
         }
@@ -288,7 +311,8 @@ public static class Reports
         foreach (WireEntity wire in wires)
         {
             WireEntity root = Find(wire);
-            totals[root] = (totals.TryGetValue(root, out double current) ? current : 0) + wire.EffectiveLength;
+            double own = insideWires.Contains(wire) ? 0 : wire.EffectiveLength;
+            totals[root] = (totals.TryGetValue(root, out double current) ? current : 0) + own;
         }
         foreach (var pass in passes)
         {
@@ -302,6 +326,18 @@ public static class Reports
             result[wire] = totals[Find(wire)];
         }
         return result;
+    }
+
+    private static bool AtAnyPin(EntityBase owner, Point point)
+    {
+        for (int i = 0; i < owner.PinCount; i++)
+        {
+            if (GeometryMath.AtPin(owner.GetPinPosition(i), point))
+            {
+                return true;
+            }
+        }
+        return false;
     }
 
     /// <summary>Per ogni filo, i tag delle guaine che lo contengono (separati da "+").</summary>
@@ -453,7 +489,7 @@ public static class Reports
             {
                 Point pin = component.GetPinPosition(i);
                 List<WireEntity> attached = wires
-                    .Where(wire => Near(wire.StartPoint, pin) || Near(wire.EndPoint, pin))
+                    .Where(wire => GeometryMath.AtPin(wire.StartPoint, pin) || GeometryMath.AtPin(wire.EndPoint, pin))
                     .ToList();
                 string pinIndex = (i + 1).ToString(CultureInfo.InvariantCulture);
                 if (attached.Count == 0)
@@ -463,7 +499,7 @@ public static class Reports
                 }
                 foreach (WireEntity wire in attached)
                 {
-                    Point other = Near(wire.StartPoint, pin) ? wire.EndPoint : wire.StartPoint;
+                    Point other = GeometryMath.AtPin(wire.StartPoint, pin) ? wire.EndPoint : wire.StartPoint;
                     Row(builder, component.Tag, pinIndex, component.GetPinLabel(i), wire.Number, EndName(entities, other));
                 }
             }
